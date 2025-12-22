@@ -7,8 +7,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-adguardhome
-PKG_VERSION:=2.1.0
-PKG_RELEASE:=20250907
+PKG_VERSION:=2.1.1
+PKG_RELEASE:=1
 
 PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
@@ -60,6 +60,7 @@ define Package/luci-app-adguardhome/postinst
 	fi
 	rm -f /tmp/luci-indexcache
 	rm -f /tmp/luci-modulecache/*
+	/etc/init.d/rpcd reload
 exit 0
 endef
 
