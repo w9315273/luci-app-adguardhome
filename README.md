@@ -8,7 +8,14 @@
 
 ## 模板与默认行为
 > [!TIP]
-> 从 **v2.2.0** 开始，可在 LuCI 界面的 **WAN 接口** 选项中直接选择要排除的网络接口，无需手动编辑模板文件
+> 从 **v2.2.0** 开始，可在 LuCI 界面的 **WAN 接口** 选项中直接选择需要排除的网卡，
+> 无需再手动编辑 `adguardhome.nft.tpl` 模板文件。
+>
+> 该选项 **仅在「重定向」模式下生效**，
+> 用于避免将来自公网接口的 DNS 请求重定向到本机，
+> 从而防止 AdGuardHome 被暴露为公共 DNS 解析器。
+>
+> 请仅选择 **直接面向公网的接口**（如 `eth0`、`pppoe-wan` 等）
 
 ## 声明
 本项目基于 https://github.com/rufengsuixing/luci-app-adguardhome 修改。
