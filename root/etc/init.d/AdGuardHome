@@ -18,17 +18,37 @@ EXTRA_HELP="        do_redirect 0 or 1\
 		force_reload
 		isrunning"
 
+get_wan_return_line() {
+    local wan
+    wan="$(uci -q get AdGuardHome.AdGuardHome.wan_ifname 2>/dev/null)"
+
+    [ -z "$wan" ] && { echo ""; return 0; }
+
+    local wan_set
+    wan_set="\"$(printf '%s' "$wan" | sed 's/ /\", \"/g')\""
+    echo "iifname { $wan_set } return"
+}
+
 set_nft_redirect() {
     local port="$1"
-    [ -z "$port" ] && return 1
+    case "$port" in
+        *[!0-9]*|"") return 1 ;;
+    esac
     [ ! -f "$NFT_RULES_TPL" ] && return 1
 
-    sed "s/__AGH_PORT__/${port}/g" "$NFT_RULES_TPL" > "$NFT_RULES_FILE"
+    local return_line
+    return_line="$(get_wan_return_line)"
+
+    awk -v port="$port" -v wan_line="$return_line" '{
+        gsub("__AGH_PORT__", port)
+        gsub("__AGH_WAN_RETURN_LINE__", wan_line)
+        print
+    }' "$NFT_RULES_TPL" > "$NFT_RULES_FILE" || return 1
+
+    [ ! -s "$NFT_RULES_FILE" ] && return 1
 
     nft delete table inet "$NFT_TABLE" 2>/dev/null
-
     nft -f "$NFT_RULES_FILE" 2>/dev/null
-    logger -t adguardhome "nft table $NFT_TABLE applied on port $port"
 }
 
 clear_nft_redirect() {
@@ -37,7 +57,6 @@ clear_nft_redirect() {
 
     [ -f "$NFT_RULES_FILE" ] && rm -f "$NFT_RULES_FILE"
     nft delete table inet "$NFT_TABLE" 2>/dev/null
-    logger -t adguardhome "nft table $NFT_TABLE cleared"
 }
 
 set_forward_dnsmasq() {
