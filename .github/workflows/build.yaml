@@ -1,4 +1,4 @@
-name: build-ipk
+name: build
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
             gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
             python3-setuptools rsync swig unzip zlib1g-dev file wget zstd jq
 
-      - name: 下载并解压 SDK
+      - name: 下载 SDK
         run: |
           set -euo pipefail
 
@@ -60,47 +60,31 @@ jobs:
           echo "SDK_DIR=${SDK_DIR}" >> "$GITHUB_ENV"
           echo "✅ SDK 已解压到: ${SDK_DIR}"
 
-      - name: 将包拷入 SDK
+      - name: 构建包
         run: |
           cd "$SDK_DIR"
+
           mkdir -p package/${PKG_DIR_NAME}
           rsync -a --delete "$GITHUB_WORKSPACE/" "package/${PKG_DIR_NAME}/" \
-            --exclude '.git' --exclude '.github' --exclude '_sdk' --exclude 'out'
+            --exclude '.git*' --exclude '_sdk'
 
-      - name: 仅更新 luci 源并安装 luci-base
-        run: |
-          cd "$SDK_DIR"
           ./scripts/feeds update luci
           ./scripts/feeds install luci-base
 
-      - name: 生成默认配置
-        run: |
-          cd "$SDK_DIR"
           make defconfig
 
-      - name: 编译包
-        run: |
-          cd "$SDK_DIR"
           make package/${PKG_DIR_NAME}/clean V=s || true
           make package/${PKG_DIR_NAME}/compile -j"$(nproc)" V=sc
 
-      - name: 收集构建产物
-        run: |
-          cd "$SDK_DIR"
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          find bin/packages -type f -name "*${PKG_DIR_NAME}*ipk" -print -exec cp -f {} "$GITHUB_WORKSPACE/out/" \;
-          cd "$GITHUB_WORKSPACE/out" && ls -l
-
-      - name: 上传构建产物
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ipks-${{ github.ref_name }}
-          path: out/
+          name: pkg-${{ github.ref_name }}
+          path: _sdk/**/bin/packages/**/${{ env.PKG_DIR_NAME }}*
           if-no-files-found: error
 
       - name: 发布到 Releases
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          files: |
-            out/*.ipk
+          files: _sdk/**/bin/packages/**/${{ env.PKG_DIR_NAME }}*
