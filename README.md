@@ -7,8 +7,9 @@
 - 模板路径：`/usr/share/AdGuardHome/adguardhome.nft.tpl`
 
 ## 模板与默认行为
-<img width="915" height="564" alt="屏幕截图 2026-01-08 052634" src="https://github.com/user-attachments/assets/a18ae8fd-3b1c-448a-b262-16447bc46cbd" />
-<img width="1634" height="630" alt="屏幕截图 2026-01-08 052656" src="https://github.com/user-attachments/assets/380f4810-68ff-4a99-a378-83e86198e9f6" />
+![01](https://github.com/user-attachments/assets/904948fc-e83e-4246-8f61-b6c978a7e073)
+![02](https://github.com/user-attachments/assets/14d51f1f-f7e7-43d4-a91c-cb95a8a9e4ef)
+
 
 > [!TIP]
 > 从 **v2.2.0** 开始，可在 LuCI 界面的 **WAN 接口** 选项中直接选择需要排除的网卡，
