@@ -83,27 +83,6 @@ msgstr "执行文件路径"
 msgid "AdGuardHome Bin path if no bin will auto download"
 msgstr "AdGuardHome 执行文件路径 如果没有执行文件将自动下载"
 
-msgid "use upx to compress bin after download"
-msgstr "下载后使用upx压缩执行文件"
-#inlist
-msgid "compress faster"
-msgstr "快速压缩"
-
-msgid "compress better"
-msgstr "更好的压缩"
-
-msgid "compress best(can be slow for big files)"
-msgstr "最好的压缩(大文件可能慢)"
-
-msgid "try all available compression methods & filters [slow]"
-msgstr "尝试所有可能的压缩方法和过滤器[慢]"
-
-msgid "try even more compression variants [very slow]"
-msgstr "尝试更多变体压缩手段[很慢]"
-
-msgid "bin use less space,but may have compatibility issues"
-msgstr "减小执行文件空间占用，但是可能压缩后有兼容性问题"
-#
 msgid "Config Path"
 msgstr "配置文件路径"
 
@@ -124,31 +103,7 @@ msgstr "AdGuardHome 运行日志 如果填syslog将写入系统日志；如果�
 
 msgid "Verbose log"
 msgstr "详细日志"
-#hide div
-msgid "Add gfwlist"
-msgstr "加入gfw列表"
 
-msgid "Add"
-msgstr "添加"
-
-msgid "Added"
-msgstr "已添加"
-
-msgid "Not added"
-msgstr "未添加"
-#hide div
-msgid "Del gfwlist"
-msgstr "删除gfw列表"
-
-msgid "Del"
-msgstr "删除"
-#hide div
-msgid "Gfwlist upstream dns server"
-msgstr "gfw列表上游服务器"
-
-msgid "Gfwlist domain upstream dns service"
-msgstr "gfw列表域名上游服务器"
-#hide div
 msgid "Change browser management password"
 msgstr "改变网页登录密码"
 
@@ -168,7 +123,8 @@ msgid "is empty"
 msgstr "为空"
 
 msgid "Press load culculate model and culculate finally save/apply"
-msgstr "按载入计算模块 然后计算 最后保存/提交"
+msgstr "按载入计算模块 然后计算 最后保存并应用"
+
 #
 msgid "Keep files when system upgrade"
 msgstr "系统升级时保留文件"
@@ -179,47 +135,8 @@ msgstr "核心执行文件"
 msgid "config file"
 msgstr "配置文件"
 
-msgid "log file"
-msgstr "日志文件"
-
-msgid "querylog.json"
-msgstr "审计日志.json"
-#
 msgid "On boot when network ok restart"
 msgstr "开机后网络准备好时重启"
-
-msgid "Backup workdir files when shutdown"
-msgstr "在关机时备份工作目录文件"
-
-msgid "Will be restore when workdir/data is empty"
-msgstr "在工作目录/data为空的时候恢复"
-
-msgid "Backup workdir path"
-msgstr "工作目录备份路径"
-
-msgid "Crontab task"
-msgstr "计划任务"
-
-msgid "Auto update core"
-msgstr "自动升级核心"
-
-msgid "Auto tail querylog"
-msgstr "自动截短查询日志"
-
-msgid "Auto tail runtime log"
-msgstr "自动截短运行日志"
-
-msgid "Auto update ipv6 hosts and restart adh"
-msgstr "自动更新ipv6主机并重启adh"
-
-msgid "Auto update gfwlist and restart adh"
-msgstr "自动更新gfw列表并重启adh"
-
-msgid "Please change time and args in crontab"
-msgstr "请在计划任务中修改时间和参数"
-
-msgid "Download links for update"
-msgstr "升级用的下载链接"
 
 #/cgi-bin/luci/admin/services/AdGuardHome/log/
 msgid "reverse"
@@ -265,23 +182,11 @@ msgstr "系统升级时保留数据"
 msgid "Boot delay until network ok"
 msgstr "开机时直到网络准备好再启动"
 
-msgid "Core Version"
-msgstr "核心分支"
-
 msgid "Upgrade Core"
 msgstr "更新核心"
 
 msgid "Current core version:"
 msgstr "当前核心版本"
-
-msgid "Latest Version"
-msgstr "最新版本"
-
-msgid "Beta Version"
-msgstr "测试版本"
-
-msgid "Core Update URL"
-msgstr "核心更新网址"
 
 msgid "WAN Interface"
 msgstr "WAN 接口"
