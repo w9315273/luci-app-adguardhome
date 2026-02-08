@@ -7,7 +7,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-adguardhome
-PKG_VERSION:=2.3.0
+PKG_VERSION:=2.3.1
 PKG_RELEASE:=1
 
 PKG_LICENSE:=MIT
@@ -24,7 +24,7 @@ define Package/luci-app-adguardhome
 	TITLE:=LuCI app for AdGuardHome
 	PKG_MAINTAINER:=https://github.com/w9315273/luci-app-adguardhome
 	PKGARCH:=all
-	DEPENDS:=+wget-ssl +tar
+	DEPENDS:=+uclient-fetch +tar
 endef
 
 define Package/luci-app-adguardhome/description
