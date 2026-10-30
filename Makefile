@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-adguardhome-tk
 PKG_VERSION:=2.6.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_MAINTAINER:=w9315273
 PKG_BUILD_DEPENDS:=luci-base/host
