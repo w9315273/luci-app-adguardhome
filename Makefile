@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-adguardhome-tk
 PKG_VERSION:=2.6.0
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=w9315273
 PKG_BUILD_DEPENDS:=luci-base/host
@@ -38,7 +38,7 @@ define Package/luci-i18n-adguardhome-tk-zh-cn
 	PKGARCH:=all
 	PROVIDES:=luci-i18n-adguardhome-zh-cn
 	CONFLICTS:=luci-i18n-adguardhome-zh-cn
-	DEPENDS:=+luci-app-adguardhome-tk
+	DEPENDS:=luci-app-adguardhome-tk
 	DEFAULT:=LUCI_LANG_zh_Hans
 endef
 
