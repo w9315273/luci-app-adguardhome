@@ -2,22 +2,63 @@ name: build-apk
 
 on:
   push:
+    branches:
+      - '**'
     tags:
       - 'v*'
       - 'dev-*'
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   SDK_DIR: /builder
   PKG_DIR_NAME: luci-app-adguardhome-tk
 
 jobs:
+  regression:
+    name: 回归测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 准备 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: 准备 Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tests/browser/requirements.txt
+
+      - name: 安装测试依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y busybox
+          python3 -m pip install -r tests/browser/requirements.txt
+          python3 -m playwright install --with-deps chromium
+
+      - name: 服务与日志回归
+        run: bash scripts/test.sh unit
+
+      - name: 浏览器回归
+        run: bash scripts/test.sh browser
+
   build:
+    needs: regression
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
     strategy:
       matrix:
         sdk: [x86-64-25.12.6]
@@ -47,6 +88,9 @@ jobs:
 
       - name: 构建包
         run: runuser -u buildbot -- bash scripts/build-apk.sh
+
+      - name: 分包与安装迁移回归
+        run: bash scripts/test.sh sdk
 
       - name: 整理 APK 产物
         run: bash scripts/collect-apks.sh

@@ -4,7 +4,8 @@ cd "$SDK_DIR"
 
 mkdir -p package/${PKG_DIR_NAME}
 rsync -a --delete "$GITHUB_WORKSPACE/" "package/${PKG_DIR_NAME}/" \
-  --exclude '.git*' --exclude '.local' --exclude '_sdk' --exclude 'dist'
+  --exclude '.git*' --exclude '.local' --exclude '_sdk' --exclude 'dist' \
+  --exclude 'tests' --exclude '.venv'
 
 ./scripts/feeds update -a
 ./scripts/feeds install luci-base tar
