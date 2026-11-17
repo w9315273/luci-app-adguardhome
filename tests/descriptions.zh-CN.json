@@ -1,0 +1,38 @@
+{
+  "DnsmasqUpstreamTests": {
+    "test_round_trip_preserves_servers_and_custom_options": "模式往返切换保留原有上游与自定义选项",
+    "test_absent_options_stay_absent": "未配置的选项在恢复后仍保持未配置",
+    "test_explicit_empty_and_noresolv_one_preserved": "保留显式空值和 noresolv 设置",
+    "test_repeated_start_and_port_change_do_not_replace_snapshot": "重复启动与端口变更不覆盖原始快照",
+    "test_domain_rules_kept_but_catch_all_removed": "保留域名专用规则并移除全局匹配规则",
+    "test_legacy_endpoint_removed_in_any_position_without_prefix_match": "精确移除旧上游地址且不误匹配相似前缀",
+    "test_legacy_upgrade_does_not_save_old_plugin_endpoint": "旧版升级不会将插件旧地址保存为原始上游",
+    "test_snapshot_commit_failure_does_not_change_dns": "快照提交失败时不修改 DNS",
+    "test_restore_restart_failure_keeps_snapshot_for_retry": "恢复时重启失败仍保留快照供重试",
+    "test_mode_switch_and_disable_through_redirect_dispatcher": "重定向调度器正确处理模式切换与停用",
+    "test_dispatcher_preserves_preexisting_matching_endpoint": "保留启用插件前已存在的相同上游地址",
+    "test_overlapping_starts_keep_original_snapshot": "并发启动仍保留原始配置快照"
+  },
+  "ServiceLifecycleTests": {
+    "test_upstream_to_exchange_releases_both_ports_before_start": "切换到端口交换模式前释放双方端口",
+    "test_exchange_to_upstream_releases_53_before_dnsmasq": "切回上游模式时先释放 53 端口再启动 dnsmasq",
+    "test_stopping_exchange_does_not_schedule_another_start": "停止端口交换模式不会再次安排启动",
+    "test_failed_stop_does_not_modify_ports": "停止服务失败时不修改端口",
+    "test_failed_dnsmasq_restart_does_not_launch_core": "dnsmasq 重启失败时不启动核心",
+    "test_crashed_core_is_started_with_prepared_ports": "核心崩溃后使用已准备的端口重新启动",
+    "test_retry_after_committed_port_but_failed_handoff": "端口已提交但交接失败后能够重试",
+    "test_config_watcher_queues_reload_only_after_dnsmasq_handoff": "配置监视器在 dnsmasq 交接完成后才安排重载",
+    "test_repeated_round_trips_keep_ports_and_original_upstreams": "反复切换后端口与原始上游保持正确"
+  },
+  "ProcessHandoffTests": {
+    "test_stop_wait_start_does_not_reuse_a_live_jail": "等待旧进程退出后才重新创建隔离实例",
+    "test_failed_jail_stop_does_not_register_a_replacement": "隔离实例停止失败时不注册替代实例",
+    "test_actual_dns_socket_handoff": "真实 DNS 套接字能够完成端口交接",
+    "test_stop_core_deletes_crashed_instance_without_pid": "清理没有 PID 的已崩溃核心实例"
+  },
+  "UpdateLockTests": {
+    "test_normal_and_force_contenders_preserve_owner_state": "普通及强制更新竞争不会破坏当前持锁者状态",
+    "test_killed_owner_does_not_leave_lock_held": "持锁进程被终止后锁能正常释放",
+    "test_failure_sets_error_and_releases_lock": "更新失败时记录错误并释放锁"
+  }
+}

@@ -29,7 +29,7 @@ function harness() {
  return { page: module.render(), nodes, polls, redirect: () => nodes[2].textContent };
 }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
-test('mode switching, timeout recovery and stale RPC replies', { timeout: 5000 }, async t => {
+test('模式切换, 超时恢复与过期 RPC 响应处理', { timeout: 5000 }, async t => {
  const realNow = Date.now;
  Date.now = () => now;
  t.after(() => { Date.now = realNow; });

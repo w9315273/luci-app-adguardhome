@@ -125,7 +125,7 @@ async function runLogTests(rpcSource, viewSource) {
 
 const test = require('node:test');
 
-test('runtime log transport, bounded reads and clear/poll race', { timeout: 5000 }, async () => {
+test('运行日志传输, 有界读取与清空和轮询的竞争处理', { timeout: 5000 }, async () => {
 	const fs = require('fs');
 	const path = require('path');
 	const root = path.resolve(__dirname, '..');
