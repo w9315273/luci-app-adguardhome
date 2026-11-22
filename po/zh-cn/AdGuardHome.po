@@ -89,6 +89,94 @@ msgstr "无法启动更新"
 msgid "Update status unavailable"
 msgstr "更新状态不可用"
 
+msgctxt "Core update log"
+msgid "Checking for core updates..."
+msgstr "开始检查更新, 请耐心等待 ..."
+
+msgctxt "Core update log"
+msgid "Update check failed. Check your network or try again later."
+msgstr "检查更新失败, 请检查网络或稍后重试!"
+
+msgctxt "Core update log"
+msgid "Executable path"
+msgstr "执行文件路径"
+
+msgctxt "Core update log"
+msgid "Current AdGuard Home version"
+msgstr "当前 AdGuardHome 版本"
+
+msgctxt "Core update log"
+msgid "Latest AdGuard Home version"
+msgstr "云端 AdGuardHome 版本"
+
+msgctxt "Core update log"
+msgid "unknown"
+msgstr "未知"
+
+msgctxt "Core update log"
+msgid "The core is already up to date."
+msgstr "已是最新版本, 无需更新!"
+
+msgctxt "Core update log"
+msgid "Device architecture"
+msgstr "设备架构"
+
+msgctxt "Core update log"
+msgid "The official core does not support this device architecture."
+msgstr "官方核心不支持当前设备架构."
+
+msgctxt "Core update log"
+msgid "Archive unavailable for this release"
+msgstr "此版本未提供安装包"
+
+msgctxt "Core update log"
+msgid "Downloading"
+msgstr "正在下载"
+
+msgctxt "Core update log"
+msgid "Download URL"
+msgstr "下载链接"
+
+msgctxt "Core update log"
+msgid "Download failed (uclient-fetch exit code)"
+msgstr "下载失败 (uclient-fetch 退出码)"
+
+msgctxt "Core update log"
+msgid "The asset API download failed. Trying the direct release URL."
+msgstr "附件 API 下载失败, 正在尝试发布页直链."
+
+msgctxt "Core update log"
+msgid "Core archive checksum verification failed."
+msgstr "核心下载文件校验失败."
+
+msgctxt "Core update log"
+msgid "The executable path points to a directory."
+msgstr "执行文件路径指向了目录."
+
+msgctxt "Core update log"
+msgid "Failed to extract the core archive."
+msgstr "核心解压失败."
+
+msgctxt "Core update log"
+msgid "The new core could not run or reported an unexpected version."
+msgstr "新核心无法运行或版本与发行版本不符."
+
+msgctxt "Core update log"
+msgid "Restarting the AdGuard Home service..."
+msgstr "正在重启 AdGuardHome 服务..."
+
+msgctxt "Core update log"
+msgid "The new core is installed, but the service failed to start. Check the runtime log."
+msgstr "新核心已安装, 服务未能正常启动, 请检查运行日志."
+
+msgctxt "Core update log"
+msgid "AdGuard Home core updated successfully."
+msgstr "AdGuardHome 核心更新成功!"
+
+msgctxt "Core update log"
+msgid "A core update is already in progress. Wait for it to finish."
+msgstr "已有更新任务正在运行, 请等待其结束."
+
 msgid "AdGuardHome Web"
 msgstr "AdGuardHome 仪表盘"
 

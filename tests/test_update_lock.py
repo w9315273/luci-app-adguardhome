@@ -73,6 +73,7 @@ if '-i' in sys.argv:
 ''')
         self.set_release('v1.2.3')
         self.state = self.directory / 'AdGuardHome-update.state'
+        self.log = self.directory / 'AdGuardHome_update.log'
         source = (ROOT / 'root/usr/share/AdGuardHome/update_core.sh').read_text()
         source = source.replace('PATH="/usr/sbin:/usr/bin:/sbin:/bin"',
                                 'PATH="$TEST_DIR:/usr/bin:/bin"')
@@ -119,19 +120,21 @@ if '-i' in sys.argv:
     def test_normal_and_force_contenders_preserve_owner_state(self):
         owner = self.start()
         self.wait_ready()
-        log = self.directory / 'AdGuardHome_update.log'
-        before = log.read_bytes()
+        before = self.log.read_bytes()
         for args in [(), ('force',)]:
             contender = self.start(*args)
             contender.communicate(timeout=5)
             self.assertEqual(contender.returncode, 2)
             self.assertIsNone(owner.poll())
-            self.assertEqual(log.read_bytes(), before)
+            self.assertEqual(self.log.read_bytes(), before)
             self.assertEqual(self.state.read_text().strip(), 'running')
         (self.directory / 'release').touch()
         owner.communicate(timeout=5)
         self.assertEqual(owner.returncode, 0)
         self.assertEqual(self.state.read_text().strip(), 'current')
+        log = self.log.read_text().splitlines()
+        self.assertIn('Checking for core updates...', log)
+        self.assertIn('The core is already up to date.', log)
         self.assertTrue((self.directory / 'AdGuardHome-update.lock').exists())
 
     def test_killed_owner_does_not_leave_lock_held(self):
@@ -164,19 +167,24 @@ if '-i' in sys.argv:
         while self.state.read_text().strip() != 'current':
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
+        self.assertIn('The core is already up to date.', self.log.read_text().splitlines())
 
     def test_force_validation_and_service_results(self):
         (self.directory / 'release').touch()
         service = self.write_executable('service', '#!/bin/sh\ntouch "$TEST_DIR/restarted"\nexit 1\n')
         old = (self.directory / 'core').read_bytes()
         self.make_archive('v1.2.3-beta.1')
-        for version, digest in [('v1.2.3', ''), ('v1.2.3-beta.1', 'sha256:bad')]:
+        for version, digest, message in [
+            ('v1.2.3', '', 'The new core could not run or reported an unexpected version.'),
+            ('v1.2.3-beta.1', 'sha256:bad', 'Core archive checksum verification failed.'),
+        ]:
             self.set_release(version, digest=digest)
             proc = self.start('force')
             proc.communicate(timeout=5)
             self.assertEqual(proc.returncode, 1)
             self.assertEqual(self.state.read_text().strip(), 'failure')
             self.assertEqual((self.directory / 'core').read_bytes(), old)
+            self.assertIn(message, self.log.read_text().splitlines())
         self.set_release('v1.2.3-beta.1')
         proc = self.start()
         proc.communicate(timeout=5)
@@ -227,8 +235,11 @@ if '-i' in sys.argv:
                 self.assertEqual((self.directory / 'core').read_bytes(), expected_core)
                 self.assertFalse((self.directory / 'restarted').exists())
                 if label == 'both-failed':
-                    log = (self.directory / 'AdGuardHome_update.log').read_text()
-                    self.assertIn('Connection timed out', log)
+                    log = self.log.read_text().splitlines()
+                    self.assertIn(f'Download URL: {api}', log)
+                    self.assertIn(f'Download URL: {direct}', log)
+                    self.assertIn('Download failed (uclient-fetch exit code): 4', log)
+                    self.assertIn('Connection error: Connection timed out', log)
 
     def test_openwrt_architectures_match_release_asset_names(self):
         source = self.script.read_text()

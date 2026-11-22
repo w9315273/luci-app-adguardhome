@@ -28,6 +28,20 @@ var callStartCoreUpdate = rpc.declare({
 	reject: true
 });
 
+function localizeUpdateLog(log) {
+	return log.split('\n').map(function(line) {
+		var separator = line.indexOf(': ');
+		if (separator === -1)
+			return line ? _(line, 'Core update log') : '';
+
+		var label = line.slice(0, separator);
+		var value = line.slice(separator + 2);
+		if (label === 'Current AdGuard Home version' && value === 'unknown')
+			value = _('unknown', 'Core update log');
+		return _(label, 'Core update log') + ': ' + value;
+	}).join('\n');
+}
+
 return view.extend({
 	handleSaveApply: function(ev, mode) {
 		var target = {
@@ -193,7 +207,7 @@ return view.extend({
 				updateButton.disabled = forceButton.disabled = state === 'running';
 				if (state === 'running' || updateFinishedHere) {
 					updateMessage.textContent = messages[state] || '';
-					lastLog = result.log || '';
+					lastLog = localizeUpdateLog(result.log || '');
 					logOptions.style.display = lastLog ? 'inline-flex' : 'none';
 					updateLog.style.display = lastLog ? 'block' : 'none';
 					showLog();

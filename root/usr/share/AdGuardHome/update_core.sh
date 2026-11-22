@@ -13,7 +13,7 @@ get_arch() {
 		arch="$(opkg print-architecture 2>/dev/null | awk '$1 == "arch" && $2 != "all" && $2 != "noarch" && $3 >= priority {arch=$2; priority=$3} END {print arch}')"
 	fi
 	arch=${arch:-$machine}
-	printf '设备架构: %s\n' "$arch" >&2
+	printf 'Device architecture: %s\n' "$arch" >&2
 	case "$arch" in
 		x86_64|x86_64_*|amd64) echo amd64 ;;
 		i[3-6]86*|x86|pentium4|pentium-mmx|geode) echo 386 ;;
@@ -78,10 +78,10 @@ wait_for_core() {
 fetch_archive() {
 	local url="$1" rc
 	shift
-	printf '下载链接: %s\n' "$url"
+	printf 'Download URL: %s\n' "$url"
 	uclient-fetch -T 20 "$@" -O "$work/core.tar.gz" "$url" 2>"$work/fetch.log" && return 0
 	rc=$?
-	printf '下载失败 (uclient-fetch 退出码 %s).\n' "$rc"
+	printf 'Download failed (uclient-fetch exit code): %s\n' "$rc"
 	# 仅显示最后一条诊断, 去掉重定向地址中临时签名的查询参数.
 	tail -n 1 "$work/fetch.log" | cut -d '?' -f 1
 	return "$rc"
@@ -91,72 +91,72 @@ update_core() {
 	local binpath bindir current version arch name asset id url digest actual
 	binpath="$(uci get AdGuardHome.AdGuardHome.binpath 2>/dev/null)"
 	binpath=${binpath:-/usr/bin/AdGuardHome/AdGuardHome}
-	printf '%s\n' '开始检查更新, 请耐心等待 ...'
+	printf '%s\n' 'Checking for core updates...'
 	work="$(mktemp -d /tmp/AdGuardHome-update.XXXXXX)" || return 1
 	if ! uclient-fetch -T 20 -q -O "$work/release.json" "$core_api_url" ||
 	   ! version="$(jsonfilter -i "$work/release.json" -e '@.tag_name')" || [ -z "$version" ]; then
-		printf '%s\n' '检查更新失败, 请检查网络或稍后重试!'
+		printf '%s\n' 'Update check failed. Check your network or try again later.'
 		return 1
 	fi
 	current="$(core_version "$binpath")"
-	printf '\n执行文件路径: %s\n当前 AdGuardHome 版本: %s\n云端 AdGuardHome 版本: %s\n' "$binpath" "${current:-未知}" "$version"
+	printf '\nExecutable path: %s\nCurrent AdGuard Home version: %s\nLatest AdGuard Home version: %s\n' "$binpath" "${current:-unknown}" "$version"
 	if [ "$current" = "$version" ] && [ "$1" != force ]; then
-		printf '\n已是最新版本, 无需更新!\n'
+		printf '\nThe core is already up to date.\n'
 		outcome=current
 		return 0
 	fi
 
-	arch="$(get_arch)" || { printf '%s\n' '官方核心不支持当前设备架构.'; return 1; }
+	arch="$(get_arch)" || { printf '%s\n' 'The official core does not support this device architecture.'; return 1; }
 	name="AdGuardHome_linux_${arch}.tar.gz"
 	asset="@.assets[@.name=\"$name\"]"
 	url="$(jsonfilter -i "$work/release.json" -e "$asset.browser_download_url")"
 	if [ -z "$url" ]; then
-		printf '此版本未提供 %s.\n' "$name"
+		printf 'Archive unavailable for this release: %s\n' "$name"
 		return 1
 	fi
 	id="$(jsonfilter -i "$work/release.json" -e "$asset.id")"
 	case "$id" in *[!0-9]*) id='' ;; esac
-	printf '\n正在下载 %s ...\n' "$name"
+	printf '\nDownloading: %s\n' "$name"
 	if [ -z "$id" ] || ! fetch_archive "${core_api_url%/latest}/assets/$id" --header='Accept: application/octet-stream'; then
-		[ -z "$id" ] || printf '%s\n' '附件 API 下载失败, 正在尝试发布页直链.'
+		[ -z "$id" ] || printf '%s\n' 'The asset API download failed. Trying the direct release URL.'
 		fetch_archive "$url" || return 1
 	fi
 	digest="$(jsonfilter -i "$work/release.json" -e "$asset.digest")"
 	if [ -n "$digest" ] && [ "$digest" != null ]; then
 		actual="$(sha256sum "$work/core.tar.gz")" || return 1
-		[ "$digest" = "sha256:${actual%% *}" ] || { printf '%s\n' '核心下载文件校验失败.'; return 1; }
+		[ "$digest" = "sha256:${actual%% *}" ] || { printf '%s\n' 'Core archive checksum verification failed.'; return 1; }
 	fi
 
 	if [ -L "$binpath" ]; then
 		binpath="$(readlink -f "$binpath")" || return 1
 	fi
-	[ ! -d "$binpath" ] || { printf '%s\n' '执行文件路径指向了目录.'; return 1; }
+	[ ! -d "$binpath" ] || { printf '%s\n' 'The executable path points to a directory.'; return 1; }
 	bindir="$(dirname "$binpath")"
 	mkdir -p "$bindir" || return 1
 	staged="$(mktemp "$bindir/.AdGuardHome.XXXXXX")" || return 1
 	if ! tar -xzOf "$work/core.tar.gz" ./AdGuardHome/AdGuardHome >"$staged" 2>/dev/null &&
 	   ! tar -xzOf "$work/core.tar.gz" AdGuardHome/AdGuardHome >"$staged"; then
-		printf '%s\n' '核心解压失败.'
+		printf '%s\n' 'Failed to extract the core archive.'
 		return 1
 	fi
 	chmod 755 "$staged" || return 1
 	if [ "$(core_version "$staged")" != "$version" ]; then
-		printf '%s\n' '新核心无法运行或版本与发行版本不符.'
+		printf '%s\n' 'The new core could not run or reported an unexpected version.'
 		return 1
 	fi
 	mv -f "$staged" "$binpath" || return 1
 	staged=''
 	case "$(uci get AdGuardHome.AdGuardHome.enabled 2>/dev/null)" in
 	1|on|true|yes|enabled)
-		printf '\n正在重启 AdGuardHome 服务...\n'
+		printf '\nRestarting the AdGuard Home service...\n'
 		if ! /etc/init.d/AdGuardHome restart 9>&- || ! wait_for_core; then
 			outcome=start_failed
-			printf '%s\n' '新核心已安装, 服务未能正常启动, 请检查运行日志.'
+			printf '%s\n' 'The new core is installed, but the service failed to start. Check the runtime log.'
 			return 1
 		fi
 		;;
 	esac
-	printf '\nAdGuardHome 核心更新成功!\n'
+	printf '\nAdGuard Home core updated successfully.\n'
 	outcome=finished
 }
 
@@ -178,7 +178,7 @@ run_update() {
 
 exec 9>/var/lock/AdGuardHome-update.lock || exit 1
 if ! flock -w 1 9; then
-	printf '%s\n' '已有更新任务正在运行, 请等待其结束.'
+	printf '%s\n' 'A core update is already in progress. Wait for it to finish.'
 	exit 2
 fi
 exec >/tmp/AdGuardHome_update.log 2>&1
