@@ -504,6 +504,7 @@ get_filesystem() {
 }
 
 config_editor() {
+    [ -e "$3" ] || return 1
     awk -v yaml="$1" -v value="$2" -v file="$3" -v ro="$4" '
     BEGIN{split(yaml,part,"\.");s="";i=1;l=length(part);}
     {
@@ -567,21 +568,11 @@ start_service() {
             ln -s /tmp/sessions.db "$workdir/data/sessions.db" 2>/dev/null
         fi
     fi
-    local ADDITIONAL_ARGS=""
+    local web_config web_host httpport
     config_get binpath $CONFIGURATION binpath "/usr/bin/AdGuardHome/AdGuardHome"
 
     mkdir -p "${binpath%/*}"
-    ADDITIONAL_ARGS="$ADDITIONAL_ARGS -c $configpath"
-    ADDITIONAL_ARGS="$ADDITIONAL_ARGS -w $workdir"
-    config_get httpport $CONFIGURATION httpport 3000
-    ADDITIONAL_ARGS="$ADDITIONAL_ARGS -p $httpport"
-
     printf '%s\n' "$binpath" "$configpath" > /lib/upgrade/keep.d/luci-app-adguardhome
-
-    config_get logfile $CONFIGURATION logfile ""
-    if [ -n "$logfile" ]; then
-        ADDITIONAL_ARGS="$ADDITIONAL_ARGS -l $logfile"
-    fi
 
     if [ ! -f "$binpath" ]; then
         _do_redirect 0
@@ -589,10 +580,28 @@ start_service() {
         exit 0
     fi
 
-    config_get_bool verbose $CONFIGURATION verbose 0
-    if [ "$verbose" -eq 1 ]; then
-        ADDITIONAL_ARGS="$ADDITIONAL_ARGS -v"
+    set -- "$binpath" -c "$configpath" -w "$workdir"
+    config_get httpport $CONFIGURATION httpport 3000
+    if "$binpath" --help 2>&1 | grep -q -e '^[[:space:]]*--web-addr '; then
+        web_host=0.0.0.0
+        case "$configpath" in
+            /*) web_config="$configpath" ;;
+            *) web_config="$workdir/$configpath" ;;
+        esac
+        if [ -e "$web_config" ]; then
+            web_host="$(sh /usr/share/AdGuardHome/web_host.sh "$binpath" "$web_config")" || {
+                logger -t AdGuardHome "Cannot read the web listener address from $web_config"
+                return 1
+            }
+        fi
+        set -- "$@" --web-addr "$web_host:$httpport"
+    else
+        set -- "$@" -p "$httpport"
     fi
+    config_get logfile $CONFIGURATION logfile ""
+    [ -z "$logfile" ] || set -- "$@" -l "$logfile"
+    config_get_bool verbose $CONFIGURATION verbose 0
+    [ "$verbose" -eq 0 ] || set -- "$@" -v
 
     if [ "$(uci -q get bypass.@global[0].global_server)" ] && [ "$(uci -q get bypass.@global[0].adguardhome)" = "1" ] && [ "$(uci -q get dhcp.@dnsmasq[0].port)" = "53" ]; then
         uci -q set AdGuardHome.AdGuardHome.redirect='exchange'
@@ -616,7 +625,7 @@ start_service() {
     procd_set_param respawn ${respawn_threshold:-3600} ${respawn_timeout:-5} ${respawn_retry:-5}
     procd_set_param limits core="unlimited" nofile="65535 65535"
     procd_set_param stderr 1
-    procd_set_param command "$binpath" $ADDITIONAL_ARGS
+    procd_set_param command "$@"
     procd_set_param file "$configpath" "/etc/hosts" "/etc/config/AdGuardHome"
     procd_close_instance
     if [ ! -f "$configpath" ]; then

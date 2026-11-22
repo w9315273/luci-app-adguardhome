@@ -8,13 +8,22 @@ function shellQuote(value) {
 	return "'" + replace(value, /'/g, "'\\''") + "'";
 }
 
-function coreUpdateRunning() {
-	// The kernel releases the lock even if the updater is killed.
-	const result = system(['/usr/bin/flock', '-n', '-E', '2',
-		'/var/lock/AdGuardHome-update.lock', '/bin/true'], 3000);
-	if (result != 0 && result != 2)
-		die('Unable to check core update lock');
-	return result == 2;
+function coreUpdateState() {
+	const path = '/var/run/AdGuardHome-update.state';
+	if (!stat(path))
+		return 'idle';
+
+	// 持读锁时读取最终状态, 避免把刚结束的任务误判为中途退出.
+	const proc = popen('/usr/bin/flock -s -n -E 2 /var/lock/AdGuardHome-update.lock /bin/cat ' + path, 'r');
+	if (!proc)
+		die('Unable to read core update state');
+	const state = trim(proc.read('all') || '');
+	const rc = proc.close();
+	if (rc == 2)
+		return 'running';
+	if (rc != 0)
+		die('Unable to read core update state');
+	return !state || state == 'running' ? 'failure' : state;
 }
 
 return {
@@ -131,28 +140,18 @@ return {
 		},
 		getCoreUpdate: {
 			call: function() {
-				const running = coreUpdateRunning();
-				const failed = stat('/var/run/update_core_error') != null ||
-					(!running && stat('/var/run/update_core') != null);
-				const log = readfile('/tmp/AdGuardHome_update.log', 131072) || '';
-
 				return {
-					state: running ? 'running' : failed ? 'failure' : log ? 'finished' : 'idle',
-					log: log
+					state: coreUpdateState(),
+					log: readfile('/tmp/AdGuardHome_update.log', 131072) || ''
 				};
 			}
 		},
 		startCoreUpdate: {
 			args: { force: false },
 			call: function(request) {
-				if (coreUpdateRunning())
-					return { started: false, reason: 'busy' };
-
-				const command = request.args.force
-					? '/bin/sh /usr/share/AdGuardHome/update_core.sh force >/dev/null 2>&1 </dev/null &'
-					: '/bin/sh /usr/share/AdGuardHome/update_core.sh >/dev/null 2>&1 </dev/null &';
-
-				return { started: system(['/bin/sh', '-c', command], 3000) == 0 };
+				const rc = system(['/bin/sh', '/usr/share/AdGuardHome/update_core.sh',
+					'--background', request.args.force ? 'force' : ''], 3000);
+				return { started: rc == 0, reason: rc == 2 ? 'busy' : rc ? 'error' : '' };
 			}
 		},
 		changeWebPassword: {

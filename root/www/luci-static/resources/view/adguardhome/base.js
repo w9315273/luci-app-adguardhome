@@ -163,9 +163,17 @@ return view.extend({
 				]))
 			]);
 			var lastLog = '';
-			var startingAt = 0;
+			var starting = false;
+			var statusRequest = 0;
 			var activeUpdate = false;
 			var updateFinishedHere = false;
+			var messages = {
+				running: _('Check...'),
+				current: _('Already up to date'),
+				finished: _('Updated'),
+				start_failed: _('Core installed, service failed to start'),
+				failure: _('Update failed')
+			};
 
 			function showLog() {
 				updateLog.value = reverseLog.checked ? lastLog.split('\n').reverse().join('\n') : lastLog;
@@ -174,12 +182,9 @@ return view.extend({
 
 			function showUpdateStatus(result) {
 				var state = result.state || 'idle';
-				if (startingAt && state === 'idle' && Date.now() - startingAt < 10000)
-					return;
-				startingAt = 0;
 				if (state === 'running')
 					activeUpdate = true;
-				else if (activeUpdate && (state === 'finished' || state === 'failure')) {
+				else if (activeUpdate && messages[state]) {
 					activeUpdate = false;
 					updateFinishedHere = true;
 					sharedStatus.refresh();
@@ -187,8 +192,7 @@ return view.extend({
 
 				updateButton.disabled = forceButton.disabled = state === 'running';
 				if (state === 'running' || updateFinishedHere) {
-					updateMessage.textContent = state === 'running' ? _('Check...') :
-						state === 'finished' ? _('Updated') : _('Update failed');
+					updateMessage.textContent = messages[state] || '';
 					lastLog = result.log || '';
 					logOptions.style.display = lastLog ? 'inline-flex' : 'none';
 					updateLog.style.display = lastLog ? 'block' : 'none';
@@ -200,8 +204,22 @@ return view.extend({
 				}
 			}
 
+			function refreshUpdate() {
+				if (starting)
+					return;
+				var request = ++statusRequest;
+				return callCoreUpdate().then(function(result) {
+					if (request === statusRequest)
+						showUpdateStatus(result);
+				}).catch(function() {
+					if (request === statusRequest)
+						updateMessage.textContent = _('Update status unavailable');
+				});
+			}
+
 			function startUpdate(force) {
-				startingAt = Date.now();
+				starting = true;
+				statusRequest++;
 				activeUpdate = true;
 				updateFinishedHere = false;
 				updateButton.disabled = forceButton.disabled = true;
@@ -210,15 +228,14 @@ return view.extend({
 				showLog();
 				updateLog.style.display = logOptions.style.display = 'none';
 				callStartCoreUpdate(force).then(function(result) {
-					if (!result.started) {
-						startingAt = 0;
-						activeUpdate = false;
+					starting = false;
+					if (!result.started && result.reason !== 'busy')
+						throw new Error();
+					if (!result.started)
 						updateMessage.textContent = _('Update in progress');
-						return;
-					}
-					return callCoreUpdate().then(showUpdateStatus);
+					return refreshUpdate();
 				}).catch(function() {
-					startingAt = 0;
+					starting = false;
 					activeUpdate = false;
 					updateButton.disabled = forceButton.disabled = false;
 					updateMessage.textContent = _('Unable to start update');
@@ -227,11 +244,7 @@ return view.extend({
 
 			updateButton.addEventListener('click', function() { startUpdate(false); });
 			forceButton.addEventListener('click', function() { startUpdate(true); });
-			poll.add(function() {
-				return callCoreUpdate().then(showUpdateStatus).catch(function() {
-					updateMessage.textContent = _('Update status unavailable');
-				});
-			}, 3);
+			poll.add(refreshUpdate, 3);
 			var settingsCard = node.querySelector('.cbi-section');
 			settingsCard.classList.add('agh-compact-card', 'agh-base-card');
 			var settingsFields = settingsCard.querySelector('.cbi-section-node') || settingsCard;

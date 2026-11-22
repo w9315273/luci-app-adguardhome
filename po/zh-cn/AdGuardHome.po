@@ -71,6 +71,12 @@ msgstr "检查中..."
 msgid "Updated"
 msgstr "已更新"
 
+msgid "Already up to date"
+msgstr "已是最新版本"
+
+msgid "Core installed, service failed to start"
+msgstr "核心已安装, 服务启动失败"
+
 msgid "Update failed"
 msgstr "更新失败"
 

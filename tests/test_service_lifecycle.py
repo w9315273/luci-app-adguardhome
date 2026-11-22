@@ -14,6 +14,8 @@ class ServiceLifecycleTests(unittest.TestCase):
         lifecycle = source[source.index('start_service() {'):source.index('\nboot() {')]
         lifecycle = lifecycle.replace('/var/run/', str(self.path) + '/')
         lifecycle = lifecycle.replace('/lib/upgrade/keep.d/luci-app-adguardhome', str(self.path / 'keep'))
+        lifecycle = lifecycle.replace('/usr/share/AdGuardHome/web_host.sh',
+                                      str(dns.ROOT / 'root/usr/share/AdGuardHome/web_host.sh'))
         self.h.functions += '\n' + lifecycle + '''
 config_load() { :; }
 config_get_bool() { config_get "$@"; }
@@ -44,7 +46,9 @@ restart_dnsmasq() {
 get_filesystem() { echo tmpfs; }
 get_tz() { SET_TZ=''; }
 procd_open_instance() { :; }
-procd_set_param() { :; }
+procd_set_param() {
+    if [ "$1" = command ]; then shift; printf '%s\n' "$@" > "$TEST_DIR/command"; fi
+}
 procd_close_instance() {
     local port="$(cat "$TEST_DIR/yaml-port")"
     [ "$port" != "$(uci -q get dhcp.@dnsmasq[0].port)" ] || return 1
@@ -54,7 +58,9 @@ procd_close_instance() {
 ubus() { echo "ubus:$3" >> "$TEST_DIR/events"; }
 start() { start_service; }
 '''
-        (self.path / 'core').touch()
+        core = self.path / 'core'
+        core.write_text('#!/bin/sh\necho "  -p, --port VALUE"\n')
+        core.chmod(0o755)
         (self.path / 'config.yaml').touch()
         (self.path / 'yaml-port').write_text('3053')
         self.h.seed(server=['9.9.9.9'], noresolv='0', port='53')
@@ -71,6 +77,68 @@ _do_redirect 1 0
 
     def events(self):
         return (self.path / 'events').read_text().splitlines()
+
+    def test_web_port_preserves_yaml_bind_address_and_paths(self):
+        config = self.path / 'config with spaces.yaml'
+        core = self.path / 'core'
+        self.h.run_shell('uci set AdGuardHome.AdGuardHome.httpport=3333; '
+                         'uci set AdGuardHome.AdGuardHome.configpath="$TEST_DIR/config with spaces.yaml"; '
+                         'uci set AdGuardHome.AdGuardHome.logfile="$TEST_DIR/log with spaces"')
+        config.write_text('bind_host: 127.0.0.1\n')
+        self.h.run_shell('start_service')
+        self.assertIn('-p', (self.path / 'command').read_text().splitlines())
+        core.write_text('''#!/bin/sh
+case "$1" in
+    --help) echo "  --web-addr VALUE";;
+    --check-config)
+        [ "$3" = "$5/config.yaml" ] && [ "$3" != "$TEST_DIR/config with spaces.yaml" ] || exit 1
+        cp "$3" "$TEST_DIR/probe-input" && cp "$TEST_DIR/normalized" "$3";;
+    *) exit 1;;
+esac
+''')
+        normalized = self.path / 'normalized'
+        probe_input = self.path / 'probe-input'
+        for content, canonical, host in [
+            (None, None, '0.0.0.0'),
+            ('http: {pprof: {port: 6060}}', 'http:\n    pprof:\n      port: 6060', '0.0.0.0'),
+            ('http:\n  pprof:\n    port: 6060\n  address: 127.0.0.1:3000', None, '127.0.0.1'),
+            ('# 管理页\r\nhttp:\r\n  address: "[::1]:8080" # local\r\n', None, '[::1]'),
+            ('http:\n extra:\n  address: 0.0.0.0:6060\n address: 127.0.0.1:3000',
+             'http:\n    address: 127.0.0.1:3000\n    extra:\n      address: 0.0.0.0:6060', '127.0.0.1'),
+            ('addr: &addr "[fe80::1%eth0]:8080"\nhttp: {address: *addr}',
+             'addr: \'[fe80::1%eth0]:8080\'\n  http:\n    address: \'[fe80::1%eth0]:8080\'', '[fe80::1%eth0]'),
+            ('bind_host: "::1"', 'bind_host: ::1', '[::1]'),
+        ]:
+            with self.subTest(content=content):
+                probe_input.unlink(missing_ok=True)
+                normalized.unlink(missing_ok=True)
+                if canonical is not None:
+                    normalized.write_text('schema_version: 35\nsource:\n  ' + canonical + '\n')
+                if content is None:
+                    config.unlink()
+                else:
+                    config.write_text(content)
+                self.h.run_shell('uci set AdGuardHome.AdGuardHome.redirect=none; start_service')
+                self.assertEqual((self.path / 'command').read_text().splitlines(),
+                                 [str(core), '-c', str(config), '-w', str(self.path / 'work'),
+                                  '--web-addr', host + ':3333', '-l', str(self.path / 'log with spaces')])
+                if canonical is not None:
+                    self.assertEqual(probe_input.read_text(), '---\nsource:\n' +
+                                     ''.join('  ' + line + '\n' for line in content.splitlines()))
+                else:
+                    self.assertFalse(probe_input.exists())
+        config.write_text('http: {address: invalid}')
+        normalized.write_text('schema_version: 35\nsource:\n  http:\n    address: invalid\n')
+        (self.path / 'command').unlink()
+        self.h.run_shell('start_service', expected=1)
+        self.assertFalse((self.path / 'command').exists())
+
+        relative = 'relative config.yaml'
+        (self.path / 'work' / relative).write_text('http:\n  address: 192.0.2.3:3000\n')
+        self.h.run_shell('uci set AdGuardHome.AdGuardHome.configpath="relative config.yaml"; start_service')
+        self.assertEqual((self.path / 'command').read_text().splitlines(),
+                         [str(core), '-c', relative, '-w', str(self.path / 'work'),
+                          '--web-addr', '192.0.2.3:3333', '-l', str(self.path / 'log with spaces')])
 
     def exchange(self):
         self.h.run_shell('uci set AdGuardHome.AdGuardHome.redirect=exchange; reload_service')
