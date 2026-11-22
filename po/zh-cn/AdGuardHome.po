@@ -92,8 +92,8 @@ msgstr "正在上传核心..."
 msgid "Unable to upload or install the core."
 msgstr "无法上传或安装核心."
 
-msgid "Another core task is running. Try uploading again when it finishes."
-msgstr "另一个核心任务正在运行, 请在完成后重新上传."
+msgid "Another core task is running. This operation did not start. Try again when it finishes."
+msgstr "另一个核心任务正在运行, 本次操作未执行. 请在任务结束后重试."
 
 msgid "Backup / Restore"
 msgstr "备份/恢复"
@@ -134,6 +134,15 @@ msgstr "恢复核心"
 
 msgid "Restore configuration"
 msgstr "恢复配置"
+
+msgid "Restore both"
+msgstr "同时恢复"
+
+msgid "Damaged core"
+msgstr "损坏的核心"
+
+msgid "Restore the core and YAML configuration together from this backup?"
+msgstr "使用此备份同时恢复核心和 YAML 配置?"
 
 msgid "Time unavailable"
 msgstr "时间未知"
@@ -219,6 +228,22 @@ msgstr "上传文件的 SHA-256 校验失败, 安装已停止."
 msgctxt "Core update log"
 msgid "Uploaded file SHA-256 verified."
 msgstr "上传文件的 SHA-256 校验通过."
+
+msgctxt "Core update log"
+msgid "The installed core is damaged. Use Force update or Upload core to repair it."
+msgstr "已安装的核心损坏. 请使用强制更新或手动上传修复."
+
+msgctxt "Core update log"
+msgid "Preserving the damaged core before repair."
+msgstr "正在保存损坏的核心原件, 以便修复后查验."
+
+msgctxt "Core update log"
+msgid "Unable to prepare the configured working directory."
+msgstr "无法准备配置指定的工作目录."
+
+msgctxt "Core update log"
+msgid "Finish recovering the interrupted restore before deleting a backup."
+msgstr "请先完成上次中断的恢复, 再删除备份."
 
 msgctxt "Core update log"
 msgid "The uploaded file is missing, empty, or exceeds 128 MiB."

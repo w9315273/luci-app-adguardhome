@@ -175,7 +175,7 @@
 }
 .agh-backup-layout {
 	display: grid;
-	grid-template-columns: fit-content(32rem) repeat(2, minmax(0, 1fr)) max-content;
+	grid-template-columns: fit-content(32rem) [core] minmax(0, 1fr) [config] minmax(0, 1fr) [both] max-content [delete] max-content;
 	width: max-content;
 	max-width: 100%;
 	margin-top: 0.65rem;
@@ -192,13 +192,16 @@
 	padding-left: 1.4rem;
 }
 .agh-backup-row > [data-action$="-core"] {
-	grid-column: -4;
+	grid-column: core;
 }
 .agh-backup-row > [data-action$="-config"] {
-	grid-column: -3;
+	grid-column: config;
+}
+.agh-backup-row > [data-action="restore-both"] {
+	grid-column: both;
 }
 .agh-backup-row > [data-action="delete"] {
-	grid-column: -2;
+	grid-column: delete;
 }
 .agh-backup-row > .agh-backup-unavailable {
 	visibility: hidden;
@@ -307,7 +310,7 @@
 		padding: 0.75rem;
 	}
 	.agh-backup-layout {
-		grid-template-columns: repeat(2, minmax(0, 1fr)) max-content;
+		grid-template-columns: [core] minmax(0, 1fr) [config] minmax(0, 1fr) [both] max-content [delete] max-content;
 		width: 100%;
 		max-width: 30rem;
 		column-gap: 0.5rem;
@@ -318,5 +321,13 @@
 	}
 	.agh-backup-info {
 		grid-column: 1 / -1;
+	}
+}
+@media (max-width: 480px) {
+	.agh-backup-layout {
+		grid-template-columns: [core] minmax(0, 1fr) [config] minmax(0, 1fr) [delete] max-content;
+	}
+	.agh-backup-row > [data-action="restore-both"] {
+		grid-column: core / delete;
 	}
 }

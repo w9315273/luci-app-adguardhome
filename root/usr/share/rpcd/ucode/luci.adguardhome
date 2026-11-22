@@ -3,6 +3,7 @@
 
 import { stat, lstat, readlink, dirname, basename, open, popen, readfile, writefile, unlink, lsdir, mkdir, mkdtemp, rmdir, rename } from 'fs';
 import { cursor } from 'uci';
+import { timer } from 'uloop';
 
 function shellQuote(value) {
 	return "'" + replace(value, /'/g, "'\\''") + "'";
@@ -52,6 +53,7 @@ function getBackupHistory() {
 		state: coreUpdateState(), core_exists: stat(path)?.type == 'file',
 		config_exists: stat(config)?.type == 'file', entries: []
 	};
+	let automatic = 0, manualCores = 0, manualConfigs = 0;
 	const dir = path + '.backups';
 	if (lstat(dir)?.type == 'directory') {
 		for (let id in (lsdir(dir) || [])) {
@@ -60,16 +62,24 @@ function getBackupHistory() {
 			const entry = dir + '/' + id;
 			if (lstat(entry)?.type != 'directory')
 				continue;
-			const meta = match(backupRecord(entry + '/meta'), /^(manual|update) (v[^,[:space:]]+|-) ([0-9a-f]{64}|-) ([0-9a-f]{64}|-)$/);
-			if (!meta || (meta[2] == '-') != (meta[3] == '-'))
+			const meta = match(backupRecord(entry + '/meta'), /^(manual|update) (v[^,[:space:]]+|damaged|-) ([0-9a-f]{64}|-) ([0-9a-f]{64}|-)$/);
+			if (!meta || (meta[2] == '-') != (meta[3] == '-') || (meta[2] == 'damaged' && meta[1] != 'update'))
 				continue;
-			const hasCore = meta[3] != '-' && lstat(entry + '/core')?.type == 'file';
+			const damaged = meta[2] == 'damaged' && lstat(entry + '/damaged-core')?.type == 'file';
+			const hasCore = meta[2] != 'damaged' && meta[3] != '-' && lstat(entry + '/core')?.type == 'file';
 			const hasConfig = meta[4] != '-' && lstat(entry + '/config.yaml')?.type == 'file';
-			if (hasCore || hasConfig)
-				push(result.entries, {
-					id: id, created: int(substr(id, 0, 10), 10), source: meta[1],
-					version: hasCore ? meta[2] : null, has_core: hasCore, has_config: hasConfig
-				});
+			if (!hasCore && !hasConfig && !damaged)
+				continue;
+			push(result.entries, {
+				id: id, created: int(substr(id, 0, 10), 10), source: meta[1],
+				version: hasCore ? meta[2] : null, has_core: hasCore, has_config: hasConfig, damaged_core: damaged
+			});
+			if (meta[1] == 'update')
+				automatic++;
+			else {
+				if (hasCore) manualCores++;
+				if (hasConfig) manualConfigs++;
+			}
 		}
 	}
 
@@ -89,14 +99,34 @@ function getBackupHistory() {
 	sort(result.entries, (a, b) => b.created - a.created || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 	const failed = result.state == 'backup_failed' || result.state == 'restore_failed' ||
 		result.state == 'restore_start_failed' || result.state == 'delete_failed';
-	if (failed || result.state == 'backed_up' || result.state == 'restored') {
+	const pruneAuto = 'Could not prune the oldest automatic backup.';
+	const pruneManual = 'Could not prune the oldest manual backup.';
+	let warnAuto = automatic > 3, warnManual = manualCores > 5 || manualConfigs > 5;
+	if (failed || result.state == 'rollback_failed' || result.state == 'backed_up' || result.state == 'restored' ||
+	    result.state == 'finished' || result.state == 'start_failed' || result.state == 'failure') {
 		const lines = split(trim(readfile('/tmp/AdGuardHome_update.log', 131072) || ''), '\n');
 		const invalid = 'YAML configuration validation failed.';
+		const workdir = 'Unable to prepare the configured working directory.';
 		const skipped = 'YAML validation skipped: no core is installed.';
-		if (failed)
-			result.detail = index(lines, invalid) >= 0 ? invalid : lines[length(lines) - 1];
+		const pendingDelete = 'Finish recovering the interrupted restore before deleting a backup.';
+		if (failed) {
+			result.detail = lines[length(lines) - 1];
+			for (let detail in [workdir, invalid])
+				if (index(lines, detail) >= 0) {
+					result.detail = detail;
+					break;
+				}
+		} else if (result.state == 'rollback_failed' && index(lines, pendingDelete) >= 0)
+			result.detail = pendingDelete;
 		else if (index(lines, skipped) >= 0)
 			result.detail = skipped;
+		warnAuto = warnAuto || index(lines, pruneAuto) >= 0;
+		warnManual = warnManual || index(lines, pruneManual) >= 0;
+	}
+	if (result.state != 'running') {
+		result.warnings = [];
+		if (warnAuto) push(result.warnings, pruneAuto);
+		if (warnManual) push(result.warnings, pruneManual);
 	}
 	return result;
 }
@@ -119,22 +149,75 @@ function clearUpload(dir) {
 	return rmdir(dir);
 }
 
+function clearUploadStage(dir) {
+	const link = dir + '/.stage';
+	const stage = readlink(link);
+	if (!stage)
+		return true;
+	const info = lstat(stage);
+	const owner = stage + '/.upload-owner';
+	if (substr(stage, 0, 1) == '/' && match(basename(stage), /^\.AdGuardHome\.[A-Za-z0-9]{6}$/) &&
+	    info?.type == 'directory' && info.uid == 0 && info.mode == 0o700 &&
+	    lstat(owner)?.type == 'file' && readfile(owner, 128) == dir + '\n') {
+		// 两端标记一致且内容全属于上传器时才回收, 绝不递归删除路径指向的目录.
+		const files = lsdir(stage);
+		if (!files)
+			return false;
+		for (let name in files) {
+			if ((name != '.upload-owner' && name != 'upload' && name != 'core') ||
+			    lstat(stage + '/' + name)?.type != 'file')
+				return unlink(link);
+		}
+		for (let name in files)
+			if (name != '.upload-owner' && !unlink(stage + '/' + name))
+				return false;
+		if (!unlink(owner) || !rmdir(stage))
+			return false;
+	}
+	return unlink(link);
+}
+
+function sweepUploads() {
+	const root = lstat(uploadRoot);
+	if (root?.type != 'directory' || root.uid != 0 || root.mode != 0o700)
+		return;
+	const cutoff = time() - 600;
+	let receiving;
+	for (let name in (lsdir(uploadRoot) || [])) {
+		if (!match(name, /^(ready\.)?[A-Za-z0-9]{6}$/))
+			continue;
+		const path = uploadRoot + '/' + name;
+		const info = lstat(path);
+		if (info?.type != 'directory' || info.uid != 0 || info.mode != 0o700 || info.mtime >= cutoff)
+			continue;
+		if (length(name) == 6) {
+			// CGI 在匿名文件中接收数据, 完成后才发布 payload. 接收期间不能按空目录的年龄删除.
+			if (receiving == null)
+				receiving = system(['/bin/sh', '-c', 'pidof cgi-upload >/dev/null'], 3000) != 1;
+			if (receiving || lstat(path)?.mtime >= cutoff)
+				continue;
+		}
+		// 活跃 worker 持有 ready 目录锁. 其他备份或更新无需阻止已遗弃目录的回收.
+		const handle = open(path, 'r');
+		if (handle) {
+			if (handle.lock('xn') && (length(name) == 6 || clearUploadStage(path)))
+				clearUpload(path);
+			handle.close();
+		}
+	}
+}
+
+// rpcd 重载后也会重新安排清理. 不依赖浏览器保持连接或下一次上传.
+timer(60000, function() {
+	this.set(60000);
+	sweepUploads();
+});
+
 function prepareCoreUpload(request) {
 	mkdir(uploadRoot, 0o700);
 	const root = lstat(uploadRoot);
 	if (root?.type != 'directory' || root.uid != 0 || root.mode != 0o700)
 		return {};
-
-	// 页面关闭时可能来不及取消, 仅回收一小时未使用的待上传目录.
-	for (let name in (lsdir(uploadRoot) || [])) {
-		if (!match(name, /^[A-Za-z0-9]{6}$/))
-			continue;
-		const path = uploadRoot + '/' + name;
-		const info = lstat(path);
-		if (info?.type == 'directory' && info.mtime < time() - 3600)
-			clearUpload(path);
-	}
-
 	const dir = mkdtemp(uploadRoot + '/XXXXXX');
 	if (!dir)
 		return {};
@@ -324,10 +407,10 @@ return {
 				const action = request.args.action;
 				if (action == 'backup-core' || action == 'backup-config' || action == 'backup')
 					return startCoreTask(action);
-				if (action != 'restore-core' && action != 'restore-config' && action != 'restore' && action != 'delete')
+				if (action != 'restore-core' && action != 'restore-config' && action != 'restore-both' && action != 'restore' && action != 'delete')
 					return { started: false, reason: 'invalid_action' };
 				const id = request.args.backup_id;
-				if (!(id == 'legacy' && action != 'restore-config') && !match(id || '', /^[0-9]{10}-[0-9]{4}$/))
+				if (!(id == 'legacy' && action != 'restore-config' && action != 'restore-both') && !match(id || '', /^[0-9]{10}-[0-9]{4}$/))
 					return { started: false, reason: 'invalid_backup' };
 				return startCoreTask(action, id);
 			}

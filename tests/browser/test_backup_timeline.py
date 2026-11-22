@@ -28,6 +28,7 @@ with sync_playwright() as runtime:
             async (action, id) => {
                 actions.push([action, id]);
                 if (window.startGate) await startGate;
+                if (window.rejectBusy) return {started: false, reason: 'busy'};
                 historyData.state = 'running';
                 return {started: true};
             } };
@@ -100,12 +101,13 @@ with sync_playwright() as runtime:
                 expect(button).to_be_enabled()
             else:
                 expect(button).to_have_count(0)
+        expect(restore_button(i, 'both')).to_have_count(int(entry['has_core'] and entry['has_config']))
     assert 'null' not in rows.first.inner_text()
 
     page.evaluate("() => { historyData.config_exists = true; return refreshHistory(); }")
     expect(create_config).to_be_visible()
     wide_positions = []
-    for width in (1120, 1440, 390, 320):
+    for width in (1120, 1440, 700, 390, 320):
         page.set_viewport_size({'width': width, 'height': 850})
         if width > 760:
             first_action = create_core.bounding_box()['x']
@@ -123,6 +125,16 @@ with sync_playwright() as runtime:
                 assert abs(box['width'] - header['width']) <= 1, (width, i, part, header, box)
         delete_x = delete_button(0).bounding_box()['x']
         config_box = create_config.bounding_box()
+        both = restore_button(2, 'both').bounding_box()
+        core = restore_button(2, 'core').bounding_box()
+        config = restore_button(2, 'config').bounding_box()
+        if width <= 480:
+            assert both['y'] >= core['y'] + core['height']
+            assert abs(both['x'] - core['x']) <= 1
+            assert abs(both['x'] + both['width'] - config['x'] - config['width']) <= 1
+        else:
+            assert both['x'] >= config['x'] + config['width']
+        assert delete_x >= both['x'] + both['width']
         assert delete_x >= config_box['x'] + config_box['width']
         for i in range(len(entries)):
             box = delete_button(i).bounding_box()
@@ -134,12 +146,35 @@ with sync_playwright() as runtime:
     dialog.get_by_role('button', name='Cancel').click()
     assert len(page.evaluate('actions')) == 1
 
+    busy = 'Another core task is running. This operation did not start. Try again when it finishes.'
+    restore_button(2, 'both').click()
+    expect(dialog).to_contain_text('Restore the core and YAML configuration together from this backup?')
+    expect(dialog).to_contain_text(entries[2]['version'])
+    page.evaluate("() => { historyData.state = 'running'; return refreshHistory(); }")
+    dialog.get_by_role('button', name='Restore both').click()
+    assert len(page.evaluate('actions')) == 1
+    expect(feedback).to_have_text(busy)
+    page.evaluate("() => { historyData.state = 'restored'; return refreshHistory(); }")
+    expect(feedback).to_have_text(busy)
+    restore_button(2, 'both').click()
+    page.evaluate("() => { window.rejectBusy = true; }")
+    dialog.get_by_role('button', name='Restore both').click()
+    assert page.evaluate('actions')[-1] == ['restore-both', entries[2]['id']]
+    expect(feedback).to_have_text(busy)
+    page.evaluate("() => { window.rejectBusy = false; }")
+    restore_button(2, 'both').click()
+    dialog.get_by_role('button', name='Restore both').click()
+    expect(restore_button(2, 'both')).to_be_disabled()
+    assert page.evaluate('actions')[-1] == ['restore-both', entries[2]['id']]
+    page.evaluate("() => { historyData.state = 'restored'; return refreshHistory(); }")
+    expect(feedback).to_have_text('')
+
     delete_button(3).click()
     expect(dialog).to_contain_text(rows.nth(3).locator('time').inner_text())
     expect(dialog).to_contain_text('Legacy backup / Core v0.107.80')
     expect(dialog).not_to_contain_text('YAML')
     dialog.get_by_role('button', name='Cancel').click()
-    assert len(page.evaluate('actions')) == 1
+    assert page.evaluate('actions')[-1] == ['restore-both', entries[2]['id']]
 
     delete_button(2).click()
     expect(dialog).to_contain_text('Before core update / Core v1.0.0 / YAML')
@@ -228,6 +263,21 @@ with sync_playwright() as runtime:
     for button in controls:
         expect(button).to_be_enabled()
     assert background_chroma(create_core) > 40
+    for state, label in [('rollback_failed', 'Rollback incomplete. The previous files are kept for the next attempt.'),
+                         ('rollback_start_failed', 'The previous files were restored, but the original service failed to start.')]:
+        page.evaluate("state => { historyData.state = state; return refreshHistory(); }", state)
+        expect(feedback).to_have_text(label)
+    warning = 'Could not prune the oldest manual backup.'
+    page.evaluate("text => { Object.assign(historyData, {state:'backed_up', warnings:[text]}); return refreshHistory(); }", warning)
+    expect(feedback).to_have_text(warning)
+    damaged = dict(id='1795392001-0001', created=1795392001, source='update', version=None, has_core=False,
+                   has_config=True, damaged_core=True)
+    page.evaluate("entry => { historyData.entries.push(entry); historyData.warnings = []; return refreshHistory(); }", damaged)
+    expect(rows.nth(2)).to_contain_text('Damaged core')
+    expect(restore_button(2, 'core')).to_have_count(0)
+    expect(restore_button(2, 'both')).to_have_count(0)
+    expect(restore_button(2, 'config')).to_be_enabled()
+    expect(delete_button(2)).to_be_enabled()
     page.evaluate("() => { editable = false; historyData.state = 'idle'; return mount(); }")
     for button in (create_core, create_config, restore_button(0, 'config'), restore_button(1, 'core'),
                    delete_button(0), delete_button(1)):

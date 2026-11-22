@@ -43,7 +43,7 @@ get_arch() {
 
 core_version() {
 	local output
-	output="$("$1" --version 9>&- 2>/dev/null)" || return 1
+	output="$("$1" --version 8<&- 9>&- 2>/dev/null)" || return 1
 	if [ "$2" = upload ]; then
 		printf '%s\n' "$output" | sed -nE 's/^AdGuard Home,? version (v[0-9]+\.[0-9]+\.[0-9]+[[:alnum:].+~-]*)([, ].*)?$/\1/p' | head -n 1
 		return
@@ -106,13 +106,17 @@ prepare_work() {
 
 . /usr/share/AdGuardHome/core_backup.sh
 
-restart_if_enabled() {
+core_service_enabled() {
 	case "$(uci get AdGuardHome.AdGuardHome.enabled 2>/dev/null)" in
-	1|on|true|yes|enabled)
-		printf '\nRestarting the AdGuard Home service...\n'
-		(umask "$service_umask"; /etc/init.d/AdGuardHome restart 9>&-) && wait_for_core
-		;;
+		1|on|true|yes|enabled) return 0 ;;
 	esac
+	return 1
+}
+
+restart_if_enabled() {
+	core_service_enabled || return 0
+	printf '\nRestarting the AdGuard Home service...\n'
+	(umask "$service_umask"; /etc/init.d/AdGuardHome restart 8<&- 9>&-) && wait_for_core
 }
 
 extract_core() {
@@ -121,13 +125,21 @@ extract_core() {
 }
 
 install_core() {
-	local current="$1" staged="$2"
+	local current="$1" staged="$2" mode="$3"
 	if [ "$(core_version "$binpath")" != "$current" ]; then
 		printf '%s\n' 'The installed core changed. Try again.'
 		return 1
 	fi
 	if [ -e "$binpath" ]; then
-		save_snapshot update "$current" || { printf '%s\n' 'Failed to save the core and YAML backup.'; return 1; }
+		if [ -z "$current" ]; then
+			case "$mode" in force|upload) ;; *)
+				printf '%s\n' 'The installed core is damaged. Use Force update or Upload core to repair it.'
+				return 1 ;;
+			esac
+			regular_file "$binpath" || return 1
+			current=damaged
+		fi
+		save_snapshot update "$current" both "$staged" || { printf '%s\n' 'Failed to save the core and YAML backup.'; return 1; }
 	fi
 	mv -f "$staged" "$binpath" || return 1
 	if ! restart_if_enabled; then
@@ -145,13 +157,16 @@ elf_arch() {
 }
 
 upload_core() {
-	local payload="$upload_dir/payload" expected="$1" actual staged size magic arch current version
+	local payload="$upload_dir/payload" expected="$1" actual staged size magic arch current version stage_path
 	printf '%s\n' 'Validating the uploaded core...'
 	if ! regular_file "$payload" || ! size="$(wc -c < "$payload")" || [ "$size" -le 0 ] || [ "$size" -gt "$upload_limit" ]; then
 		printf '%s\n' 'The uploaded file is missing, empty, or exceeds 128 MiB.'
 		return 1
 	fi
 	prepare_stage || return 1
+	# 在写入大文件前登记两端的身份. Worker 被 SIGKILL 时, rpcd 也能找到对应的磁盘暂存目录.
+	stage_path="$(readlink -f "$stage_dir")" && printf '%s\n' "$upload_dir" > "$stage_dir/.upload-owner" &&
+		ln -s "$stage_path" "$upload_dir/.stage" || return 1
 	staged="$stage_dir/core"
 	if [ -n "$expected" ]; then
 		# 校验和安装使用同一份私有副本, 已打开上传文件的 CGI 请求无法再改变其内容.
@@ -209,7 +224,7 @@ upload_core() {
 	if [ -e "$configpath" ]; then
 		check_snapshot_yaml "$staged" "$configpath" || return 1
 	fi
-	install_core "$current" "$staged"
+	install_core "$current" "$staged" upload
 }
 
 update_core() {
@@ -261,14 +276,15 @@ update_core() {
 		printf '%s\n' 'The new core could not run or reported an unexpected version.'
 		return 1
 	fi
-	install_core "$current" "$staged"
+	install_core "$current" "$staged" "$1"
 }
 
 cleanup() {
 	local rc=$?
 	trap - EXIT TERM INT HUP
 	if [ "$restore_active" = 1 ]; then
-		rollback_restore || printf '%s\n' 'Rollback incomplete. The previous files are kept for the next attempt.'
+		rollback_restore || [ "$outcome" = rollback_start_failed ] ||
+			printf '%s\n' 'Rollback incomplete. The previous files are kept for the next attempt.'
 	fi
 	[ -z "$snapshot_tmp" ] || rm -rf "$snapshot_tmp"
 	[ -z "$config_stage" ] || rm -rf "$config_stage"
@@ -276,6 +292,7 @@ cleanup() {
 	[ -z "$work" ] || rm -rf "$work"
 	if [ -n "$upload_dir" ]; then
 		rm -f "$upload_dir/payload"
+		[ -d "$stage_dir" ] || rm -f "$upload_dir/.stage"
 		rmdir "$upload_dir"
 	fi
 	printf '%s\n' "$outcome" >"$state_file"
@@ -291,9 +308,12 @@ run_update() {
 			case "$2" in ??????) ;; *) return 1 ;; esac
 			case "$2" in *[!a-zA-Z0-9]*) return 1 ;; esac
 			private_dir "$upload_root" && private_dir "$upload_root/ready.$2" || return 1
+			# 回收器通过目录锁区分仍在处理的任务和已经意外退出的任务.
+			exec 8< "$upload_root/ready.$2" || return 1
+			flock -n 8 || return 1
 			upload_dir="$upload_root/ready.$2" ;;
 		backup|backup-core|backup-config) outcome=backup_failed ;;
-		restore|restore-core|restore-config) outcome=restore_failed ;;
+		restore|restore-core|restore-config|restore-both) outcome=restore_failed ;;
 		delete) outcome=delete_failed ;;
 	esac
 	binpath="$(uci get AdGuardHome.AdGuardHome.binpath 2>/dev/null)"
@@ -308,16 +328,21 @@ run_update() {
 	pending="$binpath.restore-pending"
 	service_umask="$(umask)"
 	umask 077
-	if [ "$1" = delete ]; then
-		delete_snapshot "$2" || { printf '%s\n' 'Failed to delete the selected backup.'; return 1; }
-		return 0
-	fi
 	if [ -e "$pending" ] || [ -L "$pending" ]; then
-		rollback_restore || { printf '%s\n' 'Could not recover the interrupted restore.'; return 1; }
+		if [ "$1" = delete ]; then
+			outcome=rollback_failed
+			printf '%s\n' 'Finish recovering the interrupted restore before deleting a backup.'
+			return 1
+		fi
+		if ! rollback_restore; then
+			[ "$outcome" = rollback_start_failed ] || printf '%s\n' 'Could not recover the interrupted restore.'
+			return 1
+		fi
 	fi
 	case "$1" in
+		delete) delete_snapshot "$2" || { printf '%s\n' 'Failed to delete the selected backup.'; return 1; } ;;
 		upload) upload_core "$3" ;;
-		backup|backup-core|backup-config|restore|restore-core|restore-config) local_core_action "$@" ;;
+		backup|backup-core|backup-config|restore|restore-core|restore-config|restore-both) local_core_action "$@" ;;
 		force|'') update_core "$1" ;;
 		*) return 1 ;;
 	esac

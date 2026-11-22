@@ -216,6 +216,8 @@ return view.extend({
 				start_failed: _('Core installed, service failed to start'),
 				failure: _('Update failed'),
 				restore_start_failed: _('Service failed to start during restore'),
+				rollback_failed: _('Rollback incomplete. The previous files are kept for the next attempt.', 'Core update log'),
+				rollback_start_failed: _('The previous files were restored, but the original service failed to start.', 'Core update log'),
 				backup_failed: _('Backup failed'),
 				restore_failed: _('Restore failed'),
 				delete_failed: _('Delete failed')
@@ -305,10 +307,11 @@ return view.extend({
 				updateLog.style.display = logOptions.style.display = 'none';
 				return start().then(function(result) {
 					starting = false;
-					if (!result.started && result.reason !== 'busy')
-						throw new Error();
-					if (!result.started)
-						updateMessage.textContent = '';
+					if (!result.started) {
+						if (result.reason !== 'busy')
+							throw new Error();
+						ui.addNotification(null, E('p', {}, _('Another core task is running. This operation did not start. Try again when it finishes.')));
+					}
 					return refreshUpdate();
 				}).catch(function() {
 					starting = false;
@@ -346,8 +349,6 @@ return view.extend({
 						throw new Error();
 					var result = await callStartCoreUpload(upload.token, digest);
 					started = result.started;
-					if (!started && result.reason === 'busy')
-						ui.addNotification(null, E('p', {}, _('Another core task is running. Try uploading again when it finishes.')));
 					return result;
 				} finally {
 					if (!started)

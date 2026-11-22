@@ -113,10 +113,10 @@ test('模式切换, 超时恢复与过期 RPC 响应处理', { timeout: 5000 }, 
  const rpcSource = fs.readFileSync(path.join(root, 'root/usr/share/rpcd/ucode/luci.adguardhome'), 'utf8').replace(/^#!.*\n/, '').replace(/^import .*;\n/gm, '');
  const config = { redirect: 'exchange', enabled: '1', old_redirect: ['exchange'], old_enabled: ['1'], binpath: '/core' };
  let lock = 2;
- const api = new Function('cursor', 'type', 'trim', 'readfile', 'system', 'die', rpcSource)(
+ const api = new Function('cursor', 'type', 'trim', 'readfile', 'system', 'die', 'timer', rpcSource)(
   () => ({ get: (pkg, section, name) => config[name], unload() {} }),
   x => Array.isArray(x) ? 'array' : typeof x, x => x.trim(), () => '1', () => lock,
-  s => { throw Error(s); }
+  s => { throw Error(s); }, () => {}
  )['luci.adguardhome'];
  const result = api.getRedirectStatus.call();
  assert.equal(result.applied_mode, 'exchange'); assert.equal(result.applied_enabled, true); assert.equal(result.busy, true);

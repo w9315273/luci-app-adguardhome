@@ -127,7 +127,8 @@ parser.add_argument('-c', '--config', type=Path, required=True)
 parser.add_argument('-w', '--work-dir', required=True)
 parser.add_argument('-l', '--logfile', required=True)
 args = parser.parse_args()
-if args.work_dir != os.environ.get('WORK_DIR', os.environ['TEST_DIR']) or args.logfile != os.devnull:
+if (args.work_dir != os.environ.get('WORK_DIR', os.environ['TEST_DIR']) or
+        not Path(args.work_dir).is_dir() or args.logfile != os.devnull):
     sys.exit(2)
 content = args.config.read_text()
 with (Path(os.environ['TEST_DIR']) / 'checks').open('a') as log:
@@ -273,6 +274,81 @@ printf 'path\tgithub.com/AdguardTeam/AdGuardHome\nbuild\tGOOS=linux\n'
         self.assertNotIn('SHA-256', self.log.read_text())
         self.assertEqual(self.entries(), backups)
         self.assertFalse(self.yaml.exists())
+
+        self.core.write_bytes(b'broken')
+        self.yaml.write_bytes(yaml)
+        shutil.copyfile(candidate, self.upload_payload())
+        snapshot = self.check_new_entry('finished', 'upload', 'ABC123', hashlib.sha256(candidate.read_bytes()).hexdigest())
+        self.assertEqual((snapshot / 'damaged-core').read_bytes(), b'broken')
+        self.assertEqual((snapshot / 'config.yaml').read_bytes(), yaml)
+        self.assertEqual(self.core.read_bytes(), candidate.read_bytes())
+
+    def test_repair_preserves_damaged_files_and_requires_a_valid_backup(self):
+        self.make_archive('v1.2.3')
+        (self.directory / 'release').touch()
+        self.core.write_bytes(b'')
+        yaml = self.yaml.read_bytes()
+        self.check_action('failure', returncode=1)
+        self.assertIn('Use Force update or Upload core', self.log.read_text())
+        self.assertFalse(self.entries())
+
+        # 模拟写入保全副本失败, 确认不会提前替换原件.
+        copy = self.write_executable('cp', '''#!/bin/sh
+case "$2" in */damaged-core) exit 1;; esac
+exec /bin/cp "$@"
+''')
+        self.check_action('failure', 'force', returncode=1)
+        self.assertFalse(self.entries())
+        self.assertEqual(self.core.read_bytes(), b'')
+        self.assertEqual(self.yaml.read_bytes(), yaml)
+        copy.unlink()
+
+        snapshot = self.check_new_entry('finished', 'force')
+        self.assertEqual((snapshot / 'meta').read_text().split(),
+                         ['update', 'damaged', hashlib.sha256(b'').hexdigest(), hashlib.sha256(yaml).hexdigest()])
+        self.assertEqual((snapshot / 'damaged-core').read_bytes(), b'')
+        self.assertEqual((snapshot / 'damaged-core').stat().st_mode & 0o777, 0o600)
+        working = self.core.read_bytes()
+        for action in ('restore-core', 'restore'):
+            self.check_action('restore_failed', action, snapshot.name, returncode=1)
+            self.assertEqual(self.core.read_bytes(), working)
+        self.yaml.write_text('changed')
+        self.check_action('restored', 'restore-config', snapshot.name)
+        self.assertEqual(self.yaml.read_bytes(), yaml)
+
+        self.yaml.unlink()
+        self.core.write_bytes(b'unusable')
+        core_only = self.check_new_entry('finished', 'force')
+        self.assertEqual((core_only / 'meta').read_text().split()[-1], '-')
+        self.assertEqual((core_only / 'damaged-core').read_bytes(), b'unusable')
+        self.assertFalse(self.yaml.exists())
+        self.check_action('deleted', 'delete', core_only.name)
+        self.assertFalse(core_only.exists())
+        self.yaml.write_bytes(yaml)
+        for _ in range(3):
+            self.check_action('finished', 'force')
+        self.assertFalse(snapshot.exists())
+        self.assertEqual(len(self.entries()), 3)
+
+    def test_interrupted_upload_tracks_and_locks_its_own_extract_directory(self):
+        payload = self.upload_payload()
+        payload.write_bytes(b'\x1f\x8barchive fixture')
+        self.write_executable('tar', '''#!/bin/sh
+echo extracting
+touch "$TEST_DIR/ready"
+exec sleep 30
+''')
+        worker = self.start('upload', 'ABC123')
+        self.wait_ready()
+        stage = (payload.parent / '.stage').resolve(strict=True)
+        self.assertEqual(stage.parent, self.core.parent)
+        self.assertEqual((stage / '.upload-owner').read_text().strip(), str(payload.parent))
+        self.assertEqual((stage / 'core').read_text(), 'extracting\n')
+        self.assertNotEqual(subprocess.run(['flock', '-n', payload.parent, 'true']).returncode, 0)
+        os.killpg(worker.pid, signal.SIGKILL)
+        worker.communicate(timeout=5)
+        self.assertEqual(subprocess.run(['flock', '-n', payload.parent, 'true']).returncode, 0)
+        self.assertTrue((payload.parent / '.stage').exists())
 
     def test_uploaded_file_sha256_failure_stops_before_extraction_or_install(self):
         original_core, yaml = self.core.read_bytes(), self.yaml.read_bytes()
@@ -452,6 +528,8 @@ exec /bin/mv "$@"
         current_core = self.write_executable('core', '#!/bin/sh\necho "AdGuardHome version v1.2.4"\n').read_bytes()
         self.yaml.write_text('port: 3010\n')
         self.check_action('restore_failed', 'restore-core', first.name, returncode=1)
+        self.check_action('restore_failed', 'restore-both', first.name, returncode=1)
+        self.assertEqual(self.yaml.read_text(), 'port: 3010\n')
         self.check_action('restored', 'restore-config', first.name)
         self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), (current_core, original_yaml))
 
@@ -466,6 +544,8 @@ exec /bin/mv "$@"
         self.core.unlink()
         self.yaml.write_bytes(b'port: 3020\n')
         self.check_action('restore_failed', 'restore-config', second.name, returncode=1)
+        self.check_action('restore_failed', 'restore-both', second.name, returncode=1)
+        self.assertFalse(self.core.exists())
         self.check_action('restored', 'restore-core', second.name)
         self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), (current_core, b'port: 3020\n'))
 
@@ -519,6 +599,11 @@ exec /bin/rm "$@"
         for name, content in journal.items():
             (pending / name).write_text(content)
 
+        self.check_action('rollback_failed', 'delete', selected.name, returncode=1)
+        self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), original)
+        self.assertEqual({file.name: file.read_text() for file in pending.iterdir()}, journal)
+        self.assertFalse((self.directory / 'service-used').exists())
+        shutil.rmtree(pending)
         self.check_action('deleted', 'delete', selected.name)
         self.assertEqual(self.entries(), {retained})
         self.assertEqual((retained / 'core').stat().st_nlink, 1)
@@ -540,7 +625,6 @@ exec /bin/rm "$@"
         self.assertFalse(image.exists())
         self.assertFalse(metadata.exists())
         self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), original)
-        self.assertEqual({file.name: file.read_text() for file in pending.iterdir()}, journal)
         self.assertFalse((self.directory / 'service-used').exists())
 
     def test_delete_rejects_backups_used_as_active_yaml(self):
@@ -635,11 +719,11 @@ exec /bin/rm "$@"
     def test_yaml_backup_validates_private_copy_before_publication_and_update(self):
         self.install_validating_core('v1.2.3')
         workdir = self.directory / 'work dir'
-        workdir.mkdir()
         self.env['WORK_DIR'] = str(workdir)
         original_core = self.core.read_bytes()
         original_yaml = self.yaml.read_text()
         entry = self.check_new_entry('backed_up', 'backup-config')
+        self.assertTrue(workdir.is_dir())
         [(version, checked_path, content)] = self.config_checks()
         self.assertEqual((version, content), ('v1.2.3', original_yaml))
         self.assertNotEqual(Path(checked_path), self.yaml)
@@ -668,6 +752,14 @@ exec /bin/rm "$@"
                 self.assertEqual(self.yaml.read_text(), 'http: [\n')
                 self.assertFalse((self.directory / 'service-used').exists())
 
+    def test_yaml_validation_reports_unavailable_workdir(self):
+        self.install_validating_core('v1.2.3')
+        self.env['WORK_DIR'] = str(self.yaml / 'not-a-directory')
+        self.check_action('backup_failed', 'backup-config', returncode=1)
+        self.assertIn('Unable to prepare the configured working directory.', self.log.read_text())
+        self.assertNotIn('YAML configuration validation failed.', self.log.read_text())
+        self.assertFalse(self.config_checks() or self.entries())
+
     def test_yaml_restore_validates_with_the_core_that_will_use_it(self):
         self.install_validating_core('v1.2.3')
         saved = 'requires: v1.2.3\n'
@@ -691,7 +783,7 @@ exec /bin/rm "$@"
 
         self.env['ENABLED'] = '0'
         self.write_executable('ubus', '#!/bin/sh\nexit 0\n')
-        self.check_action('restored', 'restore', entry.name)
+        self.check_action('restored', 'restore-both', entry.name)
         self.assertEqual([check[0] for check in self.config_checks()], ['v1.2.3', 'v1.2.4', 'v1.2.3'])
         self.assertEqual((entry / 'config.yaml').read_text(), saved)
         self.assertEqual(self.yaml.read_text(), saved)
@@ -721,6 +813,7 @@ exec /bin/rm "$@"
         self.yaml.write_bytes(new_yaml)
         unchanged = self.yaml.stat()
         (entry / 'config.yaml').unlink()
+        self.check_action('restore_failed', 'restore-both', entry.name, returncode=1)
         self.check_action('restored', 'restore-core', entry.name)
         self.assertEqual(self.core.read_bytes(), original_core)
         self.assertEqual(self.yaml.read_bytes(), new_yaml)
@@ -737,12 +830,12 @@ exec /bin/rm "$@"
         self.assertEqual((self.core.stat().st_ino, self.core.stat().st_mtime_ns),
                          (unchanged.st_ino, unchanged.st_mtime_ns))
 
-    def test_failed_selective_restore_rolls_back_only_its_component(self):
+    def test_failed_selective_restore_protects_yaml_and_unselected_core(self):
         entry = self.check_new_entry('backed_up', 'backup')
         current_core = b'#!/bin/sh\necho "AdGuardHome version v1.2.4"\n'
         current_yaml = b'http:\n  address: 127.0.0.1:4000\n'
         self.env['ENABLED'] = '1'
-        # 模拟服务重启失败期间外部修改另一项, 检查回滚只还原本次替换的文件.
+        # 恢复核心时启动过程会改写 YAML, 仅恢复配置时则需保留外部换入的核心.
         self.write_executable('service', '''#!/bin/sh
 if [ "$1" = restart ]; then
     mv "$TEST_DIR/external" "$OTHER_PATH" || exit 2
@@ -759,9 +852,9 @@ fi
                 self.env['OTHER_PATH'] = str(other_file)
                 self.write_executable('external', replacement)
                 self.check_action('restore_start_failed', 'restore-' + component, entry.name, returncode=1)
-                self.assertEqual(other_file.read_text(), replacement)
+                self.assertEqual(self.yaml.read_bytes(), current_yaml)
                 if component == 'config':
-                    self.assertEqual(self.yaml.read_bytes(), current_yaml)
+                    self.assertEqual(other_file.read_text(), replacement)
                 else:
                     self.assertEqual(self.core.read_bytes(), current_core)
                 self.assertFalse((self.directory / 'core.restore-pending').exists())
@@ -880,14 +973,26 @@ exit 1
         while self.state.read_text().strip() in ('', 'running'):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
-        self.assertEqual(self.state.read_text().strip(), 'restore_start_failed', self.log.read_text())
+        self.assertEqual(self.state.read_text().strip(), 'rollback_start_failed', self.log.read_text())
         self.assertEqual((self.directory / 'actions').read_text().splitlines(), ['stop', 'restart', 'restart'])
         self.assertIn('v1.2.3', (self.directory / 'attempted').read_text())
         self.assertIn('v1.2.4', (self.directory / 'attempted').read_text())
         self.assertIn('127.0.0.1:3000', (self.directory / 'attempted').read_text())
         self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), previous)
         self.assertEqual(self.entries(), {entry})
+        pending = self.directory / 'core.restore-pending'
+        self.assertTrue((pending / 'files-restored').is_file())
+        self.check_action('rollback_start_failed', 'backup-config', returncode=1)
+        self.assertEqual(self.entries(), {entry})
+        self.assertTrue(pending.is_dir())
+        self.assertIn('original service failed to start', self.log.read_text())
+        # 用户修正端口后重试, 文件阶段不能覆盖修正, 服务启动成功才允许创建下一份备份.
+        self.yaml.write_text('http:\n  address: 127.0.0.1:5000\n')
+        self.write_executable('service', '#!/bin/sh\nexit 0\n')
+        self.script.write_text(self.script.read_text().replace('wait_for_core() {', 'wait_for_core() { return 0\n'))
         self.check_action('backed_up', 'backup')
+        self.assertFalse(pending.exists())
+        self.assertIn('5000', self.yaml.read_text())
 
     def test_killed_restore_recovers_pair_before_next_backup(self):
         entry = self.check_new_entry('backed_up', 'backup')

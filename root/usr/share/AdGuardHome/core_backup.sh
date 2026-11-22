@@ -51,9 +51,14 @@ check_snapshot_yaml() {
 	fi
 
 	# 核心校验时可能迁移 YAML 并写入配置指定的日志, 只让它改写私有副本.
+	# 禁用服务后重启会清空 /tmp 下的工作目录, 核心仍需它解析配置中的相对路径.
+	if ! (umask "$service_umask"; mkdir -p "$workdir") || [ ! -x "$workdir" ]; then
+		printf '%s\n' 'Unable to prepare the configured working directory.'
+		return 1
+	fi
 	prepare_work && cp "$yaml" "$work/check.yaml" || return 1
 	if ! regular_file "$checker" || [ ! -x "$checker" ] ||
-	   ! "$checker" --check-config -c "$work/check.yaml" -w "$workdir" -l /dev/null 9>&- >/dev/null 2>&1; then
+	   ! "$checker" --check-config -c "$work/check.yaml" -w "$workdir" -l /dev/null 8<&- 9>&- >/dev/null 2>&1; then
 		printf '%s\n' 'YAML configuration validation failed.'
 		return 1
 	fi
@@ -65,7 +70,7 @@ known_snapshot_files() {
 	private_dir "$dir" || return 1
 	for file in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
 		[ -e "$file" ] || [ -L "$file" ] || continue
-		case "${file##*/}" in .snapshot|core|config.yaml|meta) regular_file "$file" || return 1 ;; *) return 1 ;; esac
+		case "${file##*/}" in .snapshot|core|damaged-core|config.yaml|meta) regular_file "$file" || return 1 ;; *) return 1 ;; esac
 	done
 	return 0
 }
@@ -77,7 +82,7 @@ marked_snapshot() {
 discard_partial_snapshot() {
 	local dir="$1"
 	marked_snapshot "$dir" && known_snapshot_files "$dir" || return 0
-	rm -f "$dir/core" "$dir/config.yaml" "$dir/meta" && rm -f "$dir/.snapshot" && rmdir "$dir"
+	rm -f "$dir/core" "$dir/damaged-core" "$dir/config.yaml" "$dir/meta" && rm -f "$dir/.snapshot" && rmdir "$dir"
 }
 
 active_yaml_path() {
@@ -111,7 +116,7 @@ clear_partial_snapshots() {
 valid_snapshot_meta() {
 	local record
 	regular_file "$1" && IFS= read -r record < "$1" &&
-		printf '%s\n' "$record" | grep -Eq '^(manual|update) (v[^,[:space:]]+ [0-9a-f]{64} ([0-9a-f]{64}|-)|- - [0-9a-f]{64})$'
+		printf '%s\n' "$record" | grep -Eq '^((manual|update) (v[^,[:space:]]+ [0-9a-f]{64} ([0-9a-f]{64}|-)|- - [0-9a-f]{64})|update damaged [0-9a-f]{64} ([0-9a-f]{64}|-))$'
 }
 
 expire_snapshot() {
@@ -214,10 +219,17 @@ copy_snapshot_core() {
 
 save_snapshot() {
 	local origin="$1" current="$2" part="${3:-both}" hash=- yaml_hash=- dir timestamp sequence id ledger last=0
-	local groups file
+	local groups file checker="$binpath"
+	if [ "$current" = damaged ]; then
+		# 原件只保全字节, 可运行的新核心负责校验同一份快照中的配置.
+		checker="$4"
+		resolve_config || return 1
+		[ -e "$configpath" ] || part=core
+		printf '%s\n' 'Preserving the damaged core before repair.'
+	fi
 	if [ "$part" != config ]; then
 		[ -n "$current" ] || { printf '%s\n' 'No working core is available to back up.'; return 1; }
-		printf 'Backing up core version: %s\n' "$current"
+		[ "$current" = damaged ] || printf 'Backing up core version: %s\n' "$current"
 	fi
 	if [ "$part" != core ]; then
 		resolve_config && [ -s "$configpath" ] || { printf '%s\n' 'No readable YAML configuration is available to back up.'; return 1; }
@@ -229,11 +241,17 @@ save_snapshot() {
 	snapshot_tmp="$(mktemp -d "$history/.new.XXXXXX")" || return 1
 	printf '%s\n' 'AdGuard Home backup v1' > "$snapshot_tmp/.snapshot" || return 1
 	if [ "$part" != config ]; then
-		hash="$(file_hash "$binpath")" && copy_snapshot_core "$current" "$hash" || return 1
+		hash="$(file_hash "$binpath")" || return 1
+		if [ "$current" = damaged ]; then
+			cp "$binpath" "$snapshot_tmp/damaged-core" && chmod 600 "$snapshot_tmp/damaged-core" &&
+				[ "$(file_hash "$snapshot_tmp/damaged-core")" = "$hash" ] || return 1
+		else
+			copy_snapshot_core "$current" "$hash" || return 1
+		fi
 	fi
 	if [ "$part" != core ]; then
 		cp "$configpath" "$snapshot_tmp/config.yaml" && chmod 600 "$snapshot_tmp/config.yaml" || return 1
-		check_snapshot_yaml "$binpath" "$snapshot_tmp/config.yaml" || return 1
+		check_snapshot_yaml "$checker" "$snapshot_tmp/config.yaml" || return 1
 		yaml_hash="$(file_hash "$snapshot_tmp/config.yaml")" && [ "$yaml_hash" = "$(file_hash "$configpath")" ] || return 1
 	fi
 	if [ "$part" != config ] && [ "$hash" != "$(file_hash "$binpath")" ]; then
@@ -292,6 +310,7 @@ load_snapshot() {
 		dir="$history/$id"
 		private_dir "$dir" && valid_snapshot_meta "$dir/meta" || return 1
 		IFS=' ' read -r _origin saved_version saved_core_hash saved_yaml_hash < "$dir/meta" || return 1
+		[ "$saved_version" != damaged ] || [ "$part" = config ] || return 1
 		if [ "$part" != config ] && [ "$saved_core_hash" != - ]; then
 			source_core="$dir/core"
 			regular_file "$source_core" || return 1
@@ -301,6 +320,9 @@ load_snapshot() {
 			regular_file "$source_yaml" || return 1
 		fi
 		[ -n "$source_core" ] || [ -n "$source_yaml" ] || return 1
+	fi
+	if [ "$part" = both ]; then
+		[ -n "$source_core" ] && [ -n "$source_yaml" ] || return 1
 	fi
 }
 
@@ -333,7 +355,7 @@ stop_live_core() {
 	local pid
 	pid="$(ubus call service list '{"name":"AdGuardHome"}' 2>/dev/null | jsonfilter -e '@.AdGuardHome.instances.instance1.pid')"
 	case "$pid" in ''|*[!0-9]*) return 0 ;; esac
-	(umask "$service_umask"; /etc/init.d/AdGuardHome stop 9>&-)
+	(umask "$service_umask"; /etc/init.d/AdGuardHome stop 8<&- 9>&-)
 }
 
 prepare_rollback() {
@@ -347,29 +369,35 @@ prepare_rollback() {
 	else
 		[ ! -e "$binpath" ] && touch "$dir/no-core" || return 1
 	fi
-	if [ -n "$source_yaml" ]; then
+	if [ "$apply_service" = 1 ]; then
+		pid="$(ubus call service list '{"name":"AdGuardHome"}' 2>/dev/null | jsonfilter -e '@.AdGuardHome.instances.instance1.pid')"
+		case "$pid" in
+			''|*[!0-9]*) core_service_enabled || apply_service=0 ;;
+			*) touch "$dir/was-running" || return 1 ;;
+		esac
+	fi
+	if [ "$apply_service" = 0 ]; then
+		touch "$dir/keep-service" || return 1
+	fi
+	# 即使只恢复核心, 启停服务也可能迁移或改写当前 YAML.
+	if [ -n "$source_yaml" ] || [ "$apply_service" = 1 ]; then
+		[ -n "$source_yaml" ] || resolve_config || return 1
 		printf '%s\n' "$configpath" > "$dir/config-path" || return 1
-		printf '%s\n' "${config_stage##*/}" > "$dir/yaml-stage" || return 1
+		if [ -n "$config_stage" ]; then
+			printf '%s\n' "${config_stage##*/}" > "$dir/yaml-stage" || return 1
+		fi
 		if regular_file "$configpath"; then
 			cp -p "$configpath" "$dir/previous-yaml" || return 1
 		else
 			[ ! -e "$configpath" ] && touch "$dir/no-yaml" || return 1
 		fi
 	fi
-	if [ "$apply_service" = 1 ]; then
-		pid="$(ubus call service list '{"name":"AdGuardHome"}' 2>/dev/null | jsonfilter -e '@.AdGuardHome.instances.instance1.pid')"
-		case "$pid" in ''|*[!0-9]*) ;; *) touch "$dir/was-running" || return 1 ;; esac
-	else
-		touch "$dir/keep-service" || return 1
-	fi
 	mv "$dir" "$pending" || return 1
 	restore_active=1
 }
 
-rollback_restore() {
-	local cfg dir name restart=0
-	[ -e "$pending" ] || { [ ! -L "$pending" ]; return; }
-	private_dir "$pending" || return 1
+rollback_restore_files() {
+	local cfg dir name
 	regular_file "$pending/keep-service" || stop_live_core || return 1
 	if regular_file "$pending/previous-core"; then
 		if [ ! "$pending/previous-core" -ef "$binpath" ]; then
@@ -402,25 +430,36 @@ rollback_restore() {
 		else
 			return 1
 		fi
-		if read -r name < "$pending/yaml-stage"; then
+		if regular_file "$pending/yaml-stage" && read -r name < "$pending/yaml-stage"; then
 			case "$name" in .AdGuardHome.??????) rm -rf "$(dirname "$cfg")/$name" ;; esac
 		fi
 	fi
-	if regular_file "$pending/was-running" && regular_file "$binpath"; then
-		restart=1
-	fi
 	if read -r name < "$pending/core-stage"; then
 		case "$name" in .AdGuardHome.??????) rm -rf "$bindir/$name" ;; esac
+	fi
+}
+
+rollback_restore() {
+	local dir original_outcome="$outcome"
+	outcome=rollback_failed
+	private_dir "$pending" || return 1
+	# 文件已回滚后允许用户修正配置或端口, 下次只重试启动, 避免重复覆盖用户修改.
+	if ! regular_file "$pending/files-restored"; then
+		rollback_restore_files && touch "$pending/files-restored" || return 1
+	fi
+	if regular_file "$pending/was-running" && core_service_enabled; then
+		if ! regular_file "$binpath" || ! restart_if_enabled; then
+			outcome=rollback_start_failed
+			printf '%s\n' 'The previous files were restored, but the original service failed to start.'
+			return 1
+		fi
 	fi
 	# 先移除事务标记, 避免断电时将一半清理完的目录再次当作待恢复事务.
 	dir="$(mktemp -d "$bindir/.AdGuardHome.XXXXXX")" || return 1
 	mv "$pending" "$dir/completed" && rm -rf "$dir" || return 1
 	restore_active=0
-	if [ "$restart" = 1 ] && ! restart_if_enabled; then
-		printf '%s\n' 'The previous files were restored, but the original service failed to start.'
-	else
-		printf '%s\n' 'The previous files were restored.'
-	fi
+	outcome="$original_outcome"
+	printf '%s\n' 'The previous files were restored.'
 }
 
 restore_snapshot() {
@@ -469,9 +508,9 @@ restore_snapshot() {
 
 local_core_action() {
 	local op="$1" part="${1#*-}" current=- success failure
-	case "$op" in backup|restore) part=both ;; esac
+	case "$op" in backup) part=both ;; restore) part=available ;; esac
 	case "$op" in
-		restore|restore-core|restore-config) restore_snapshot "$2" "$part"; return $? ;;
+		restore|restore-core|restore-config|restore-both) restore_snapshot "$2" "$part"; return $? ;;
 	esac
 	case "$part" in
 		core)   success='Core backup saved.'; failure='Failed to save the core backup.' ;;

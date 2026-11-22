@@ -22,7 +22,7 @@ define Package/luci-app-adguardhome-tk
 	PKGARCH:=all
 	PROVIDES:=luci-app-adguardhome
 	CONFLICTS:=luci-app-adguardhome
-	DEPENDS:=+luci-base +rpcd-mod-ucode +uclient-fetch +jsonfilter +flock +ca-bundle +!(PACKAGE_libustream-openssl||PACKAGE_libustream-wolfssl):libustream-mbedtls +tar
+	DEPENDS:=+luci-base +rpcd-mod-ucode +ucode-mod-uloop +uclient-fetch +jsonfilter +flock +ca-bundle +!(PACKAGE_libustream-openssl||PACKAGE_libustream-wolfssl):libustream-mbedtls +tar
 endef
 
 define Package/luci-app-adguardhome-tk/description

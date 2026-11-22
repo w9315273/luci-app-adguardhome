@@ -38,6 +38,7 @@ return view.extend({
 		var starting = false;
 		var refreshingCore = false;
 		var actionError = '';
+		var busyMessage = _('Another core task is running. This operation did not start. Try again when it finishes.');
 		var entryButtons = [];
 		var formatter = new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
 			year: 'numeric', month: '2-digit', day: '2-digit',
@@ -50,6 +51,8 @@ return view.extend({
 		};
 		var errorLabels = {
 			restore_start_failed: _('Service failed to start during restore'),
+			rollback_start_failed: _('The previous files were restored, but the original service failed to start.', 'Core update log'),
+			rollback_failed: _('Rollback incomplete. The previous files are kept for the next attempt.', 'Core update log'),
 			backup_failed: _('Backup failed'),
 			restore_failed: _('Restore failed'),
 			delete_failed: _('Delete failed')
@@ -66,6 +69,10 @@ return view.extend({
 				restore: _('Restore configuration'),
 				missing: _('The YAML configuration file is missing.'),
 				question: _('Restore the YAML configuration from this backup?')
+			},
+			both: {
+				restore: _('Restore both'),
+				question: _('Restore the core and YAML configuration together from this backup?')
 			}
 		};
 		function createButton(component) {
@@ -119,9 +126,9 @@ return view.extend({
 			var button = E('button', {
 				'class': 'btn cbi-button cbi-button-action', 'type': 'button', 'data-action': action,
 				'click': function() {
-					var description = component === 'core' && entry.version ? timeLabel + ' / ' + entry.version : timeLabel;
-					var restart = component === 'core' ? _('The service will restart if enabled.') :
-						_('The service will restart if enabled and the core is installed.');
+					var description = component !== 'config' && entry.version ? timeLabel + ' / ' + entry.version : timeLabel;
+					var restart = component === 'config' ? _('The service will restart if enabled and the core is installed.') :
+						_('The service will restart if enabled.');
 					confirmAction(action, entry.id, labels.restore, description, labels.question + ' ' + restart);
 				}
 			}, labels.restore);
@@ -138,11 +145,14 @@ return view.extend({
 			if (entry.has_core) {
 				contents.push(_('Core', 'AdGuard Home status') + (entry.version ? ' ' + entry.version : ''));
 				actions.push(restoreButton(entry, timeLabel, 'core'));
-			}
+			} else if (entry.damaged_core)
+				contents.push(_('Damaged core'));
 			if (entry.has_config) {
 				contents.push('YAML');
 				actions.push(restoreButton(entry, timeLabel, 'config'));
 			}
+			if (entry.has_core && entry.has_config)
+				actions.push(restoreButton(entry, timeLabel, 'both'));
 			var deleteButton = E('button', {
 				'class': 'btn cbi-button cbi-button-remove', 'type': 'button', 'data-action': 'delete',
 				'click': function() {
@@ -179,9 +189,13 @@ return view.extend({
 					list.replaceChildren(...entries.map(renderEntry));
 				}
 				empty.hidden = entries.length > 0;
-				var text = actionError || errorLabels[result.state] || '';
-				if (!actionError && result.detail)
+				var text = errorLabels[result.state] || '';
+				if (result.detail)
 					text += (text ? ': ' : '') + _(result.detail, 'Core update log');
+				if (actionError)
+					text = actionError + (text ? ' ' + text : '');
+				for (var warning of result.warnings || [])
+					text += (text ? ' ' : '') + _(warning, 'Core update log');
 				if (result.state !== 'running') {
 					if (!result.core_exists && result.detail !== 'YAML validation skipped: no core is installed.')
 						text += (text ? ' ' : '') + _('No core is installed. YAML backups and restores will skip validation.');
@@ -214,17 +228,25 @@ return view.extend({
 		}
 
 		function run(action, id) {
-			if (readonly || starting || !history || history.state === 'running')
+			if (readonly || !history)
 				return;
+			if (starting || history.state === 'running') {
+				actionError = busyMessage;
+				message.textContent = actionError;
+				return;
+			}
 			starting = true;
 			requestNumber++;
 			actionError = '';
 			message.textContent = '';
 			updateControls();
 			return callBackupAction(action, id).then(function(result) {
-				if (!result.started && result.reason !== 'busy')
-					throw new Error();
-				if (action.indexOf('restore-') === 0 && result.started)
+				if (!result.started) {
+					if (result.reason === 'busy')
+						actionError = busyMessage;
+					else
+						throw new Error();
+				} else if (action.indexOf('restore-') === 0)
 					refreshingCore = true;
 			}).catch(function() {
 				actionError = _('Unable to start backup operation');
