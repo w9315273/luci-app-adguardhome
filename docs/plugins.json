@@ -1,0 +1,20 @@
+[
+  {
+    "repo": "w9315273/luci-app-adguardhome",
+    "name": "AdGuard Home for LuCI",
+    "zh": "AdGuard Home 管理",
+    "en": "AdGuard Home management"
+  },
+  {
+    "repo": "w9315273/luci-app-pulse",
+    "name": "LuCI Pulse",
+    "zh": "系统监控",
+    "en": "System monitor"
+  },
+  {
+    "repo": "w9315273/openwrt-traffic-stats",
+    "name": "OpenWrt Traffic Stats",
+    "zh": "设备流量统计",
+    "en": "Per-device traffic"
+  }
+]

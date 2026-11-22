@@ -1,3 +1,24 @@
+<!-- plugin-list: en w9315273/luci-app-adguardhome -->
+<table>
+  <tr><th colspan="3">My plugin list</th></tr>
+  <tr valign="middle">
+    <td><img src="https://img.shields.io/github/stars/w9315273/luci-app-adguardhome?style=flat&amp;label=%E2%98%85&amp;color=57606a" height="16" alt="AdGuard Home for LuCI · GitHub stars"></td>
+    <td><strong>AdGuard Home for LuCI</strong></td>
+    <td>AdGuard Home management</td>
+  </tr>
+  <tr valign="middle">
+    <td><img src="https://img.shields.io/github/stars/w9315273/luci-app-pulse?style=flat&amp;label=%E2%98%85&amp;color=57606a" height="16" alt="LuCI Pulse · GitHub stars"></td>
+    <td><strong><a href="https://github.com/w9315273/luci-app-pulse">LuCI Pulse</a></strong></td>
+    <td>System monitor</td>
+  </tr>
+  <tr valign="middle">
+    <td><img src="https://img.shields.io/github/stars/w9315273/openwrt-traffic-stats?style=flat&amp;label=%E2%98%85&amp;color=57606a" height="16" alt="OpenWrt Traffic Stats · GitHub stars"></td>
+    <td><strong><a href="https://github.com/w9315273/openwrt-traffic-stats">OpenWrt Traffic Stats</a></strong></td>
+    <td>Per-device traffic</td>
+  </tr>
+</table>
+<!-- /plugin-list -->
+
 # AdGuard Home for LuCI
 
 Manage AdGuard Home in OpenWrt's LuCI interface. LuCI pages are rewritten in JavaScript, with an rpcd + ucode backend and nftables-based DNS forwarding.
