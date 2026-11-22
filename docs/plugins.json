@@ -3,18 +3,29 @@
     "repo": "w9315273/luci-app-adguardhome",
     "name": "AdGuard Home for LuCI",
     "zh": "AdGuard Home 管理",
-    "en": "AdGuard Home management"
+    "en": "AdGuard Home management",
+    "screenshots": {
+      "zh": "docs/screenshots/base-zh-cn.png",
+      "en": "docs/screenshots/base-en.png"
+    }
   },
   {
     "repo": "w9315273/luci-app-pulse",
     "name": "LuCI Pulse",
     "zh": "系统监控",
-    "en": "System monitor"
+    "en": "System monitor",
+    "screenshots": {
+      "zh": "docs/screenshot-zh-cn.png",
+      "en": "docs/screenshot-en.png"
+    }
   },
   {
     "repo": "w9315273/openwrt-traffic-stats",
     "name": "OpenWrt Traffic Stats",
     "zh": "设备流量统计",
-    "en": "Per-device traffic"
+    "en": "Per-device traffic",
+    "screenshots": {
+      "default": "docs/images/overview.png"
+    }
   }
 ]

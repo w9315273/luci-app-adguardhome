@@ -3,16 +3,33 @@ import json
 import re
 from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 TITLES = {"zh": "我的插件列表", "en": "My plugin list"}
 STAR_LABELS = {"zh": "GitHub 星数", "en": "GitHub stars"}
+SCREENSHOT_LABELS = {"zh": "界面截图", "en": "screenshot"}
 BLOCK = re.compile(
     r"^<!-- plugin-list: (?P<lang>zh|en) (?P<repo>\S+) -->(?P<newline>\r?\n)"
     r"(?P<body>.*?)^<!-- /plugin-list -->\r?$",
     re.MULTILINE | re.DOTALL,
 )
+
+
+def render_description(plugin, lang):
+    description = escape(plugin[lang])
+    screenshots = plugin.get("screenshots", {})
+    path = screenshots.get(lang) or screenshots.get("default")
+    if not path:
+        return description
+    image_url = f'https://raw.githubusercontent.com/{quote(plugin["repo"])}/HEAD/{quote(path)}'
+    alt = escape(f'{plugin["name"]} · {SCREENSHOT_LABELS[lang]}')
+    return (
+        f"<details><summary>{description}</summary>"
+        f'<a href="{image_url}"><img src="{image_url}" width="100%" alt="{alt}"></a>'
+        "</details>"
+    )
 
 
 def render_table(plugins, lang, current_repo):
@@ -25,11 +42,12 @@ def render_table(plugins, lang, current_repo):
         badge = f'<img src="{badge_url}" height="16" alt="{name} · {STAR_LABELS[lang]}">'
         if plugin["repo"] != current_repo:
             name = f'<a href="{repo_url}">{name}</a>'
+        # 由说明列预留宽度, 避免展开截图时把居中的表头推向一侧.
         rows.extend([
-            '  <tr valign="middle">',
+            '  <tr valign="top">',
             f'    <td><a href="{repo_url}">{badge}</a></td>',
             f"    <td><strong>{name}</strong></td>",
-            f"    <td>{escape(plugin[lang])}</td>",
+            f'    <td width="360">{render_description(plugin, lang)}</td>',
             "  </tr>",
         ])
     return [*rows, "</table>"]
