@@ -30,9 +30,12 @@ var callStartCoreUpdate = rpc.declare({
 
 function localizeUpdateLog(log) {
 	return log.split('\n').map(function(line) {
+		if (!line)
+			return '';
+		var translated = _(line, 'Core update log');
 		var separator = line.indexOf(': ');
-		if (separator === -1)
-			return line ? _(line, 'Core update log') : '';
+		if (translated !== line || separator === -1)
+			return translated;
 
 		var label = line.slice(0, separator);
 		var value = line.slice(separator + 2);
@@ -182,12 +185,20 @@ return view.extend({
 			var activeUpdate = false;
 			var updateFinishedHere = false;
 			var messages = {
-				running: _('Check...'),
 				current: _('Already up to date'),
 				finished: _('Updated'),
 				start_failed: _('Core installed, service failed to start'),
-				failure: _('Update failed')
+				failure: _('Update failed'),
+				restore_start_failed: _('Service failed to start during restore'),
+				backup_failed: _('Backup failed'),
+				restore_failed: _('Restore failed'),
+				delete_failed: _('Delete failed')
 			};
+
+			function setBusy(busy) {
+				updateButton.disabled = forceButton.disabled = !!(busy || m.readonly);
+			}
+			setBusy(false);
 
 			function showLog() {
 				updateLog.value = reverseLog.checked ? lastLog.split('\n').reverse().join('\n') : lastLog;
@@ -198,13 +209,13 @@ return view.extend({
 				var state = result.state || 'idle';
 				if (state === 'running')
 					activeUpdate = true;
-				else if (activeUpdate && messages[state]) {
+				else if (activeUpdate && state !== 'idle') {
 					activeUpdate = false;
 					updateFinishedHere = true;
 					sharedStatus.refresh();
 				}
 
-				updateButton.disabled = forceButton.disabled = state === 'running';
+				setBusy(state === 'running');
 				if (state === 'running' || updateFinishedHere) {
 					updateMessage.textContent = messages[state] || '';
 					lastLog = localizeUpdateLog(result.log || '');
@@ -236,7 +247,7 @@ return view.extend({
 				statusRequest++;
 				activeUpdate = true;
 				updateFinishedHere = false;
-				updateButton.disabled = forceButton.disabled = true;
+				setBusy(true);
 				updateMessage.textContent = _('Check...');
 				lastLog = '';
 				showLog();
@@ -246,12 +257,12 @@ return view.extend({
 					if (!result.started && result.reason !== 'busy')
 						throw new Error();
 					if (!result.started)
-						updateMessage.textContent = _('Update in progress');
+						updateMessage.textContent = '';
 					return refreshUpdate();
 				}).catch(function() {
 					starting = false;
 					activeUpdate = false;
-					updateButton.disabled = forceButton.disabled = false;
+					setBusy(false);
 					updateMessage.textContent = _('Unable to start update');
 				});
 			}

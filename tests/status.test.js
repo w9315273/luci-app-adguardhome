@@ -8,7 +8,7 @@ let now = 10000;
 const storage = new Map();
 let info = { mode: 'dnsmasq-upstream', enabled: true, applied_mode: 'dnsmasq-upstream', applied_enabled: true, redirected: true, busy: false, binpath: '/core' };
 let running = true, fail = false, held = null, requests = 0;
-function harness() {
+function harness(translate = text => text) {
  const nodes = [], polls = [];
  const module = new Function('baseclass', 'rpc', 'poll', 'E', '_', 'sessionStorage', 'L', source)(
   { extend: x => x },
@@ -22,13 +22,25 @@ function harness() {
   } },
   { add: (fn, interval) => polls.push({ fn, interval }) },
   (tag, attrs, children) => { const n = { ...attrs, style: {}, textContent: children }; nodes.push(n); return n; },
-  x => x,
+  translate,
   { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
   { url: (...parts) => '/cgi-bin/luci/' + parts.join('/') }
  );
  return { page: module.render(), nodes, polls, redirect: () => nodes[2].textContent };
 }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+test('状态栏使用插件自己的核心译名', async () => {
+ const catalog = fs.readFileSync(path.join(root, 'po/zh-cn/AdGuardHome.po'), 'utf8');
+ const entry = catalog.match(/^msgctxt "([^"]+)"\nmsgid "Core"\nmsgstr "([^"]+)"$/m);
+ assert.ok(entry, '核心译名需要独立的翻译上下文');
+ const h = harness((text, context) => {
+  if (text !== 'Core') return text;
+  return context === entry[1] ? entry[2] : '内核';
+ });
+ await flush();
+ assert.equal(h.nodes[0].textContent, '核心: test');
+});
+
 test('模式切换, 超时恢复与过期 RPC 响应处理', { timeout: 5000 }, async t => {
  const realNow = Date.now;
  Date.now = () => now;

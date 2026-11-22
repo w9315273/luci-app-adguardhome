@@ -42,7 +42,7 @@ test('核心更新区分最新版本, 成功与启动失败, 忽略点击前的�
 		requests.push(force);
 		return start.promise;
 	} : () => Promise.resolve(reply) };
-	const { button, force, message, poll } = await renderUpdateView(rpc);
+	const { button, force, message, log, poll } = await renderUpdateView(rpc);
 	const stale = Promise.withResolvers();
 	reply = stale.promise;
 	const previousPoll = poll();
@@ -63,12 +63,22 @@ test('核心更新区分最新版本, 成功与启动失败, 忽略点击前的�
 		force.click();
 		await nextTurn();
 		assert.equal(force.disabled, true);
+		assert.equal(message.textContent, '');
 		reply = { state };
 		await poll();
 		assert.equal(message.textContent, label);
 		assert.equal(force.disabled, false);
 	}
 	assert.deepEqual(requests, [false, true, true, true]);
+	for (const state of ['backed_up', 'restored', 'deleted']) {
+		reply = { state: 'running' };
+		await poll();
+		reply = { state, log: 'Operation log' };
+		await poll();
+		assert.equal(message.textContent, '');
+		assert.equal(force.disabled, false);
+		assert.equal(log.value, reply.log);
+	}
 });
 
 test('不同语言的 LuCI 页面读取同一后台任务时按各自语言显示日志和逆序', async () => {
@@ -89,6 +99,8 @@ test('不同语言的 LuCI 页面读取同一后台任务时按各自语言显�
 		'Executable path: ' + executable,
 		'Current AdGuard Home version: unknown',
 		'Download URL: ' + url,
+		'YAML validation skipped: no core is installed.',
+		'YAML configuration validation failed.',
 		diagnostic,
 		'Connection error: Connection timed out',
 		''
@@ -109,6 +121,8 @@ test('不同语言的 LuCI 页面读取同一后台任务时按各自语言显�
 		'执行文件路径: ' + executable,
 		'当前 AdGuardHome 版本: 未知',
 		'下载链接: ' + url,
+		'未安装核心, 已跳过 YAML 配置校验.',
+		'YAML 配置校验失败.',
 		diagnostic,
 		'Connection error: Connection timed out',
 		''

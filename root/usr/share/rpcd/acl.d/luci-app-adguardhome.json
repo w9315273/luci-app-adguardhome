@@ -7,13 +7,13 @@
 			},
 			"ubus": {
 				"service": [ "list" ],
-				"luci.adguardhome": [ "getCoreInfo", "getRedirectStatus", "getCoreUpdate", "getInterfaces", "getRuntimeLog", "getManualConfig" ]
+				"luci.adguardhome": [ "getCoreInfo", "getRedirectStatus", "getCoreUpdate", "getBackupHistory", "getInterfaces", "getRuntimeLog", "getManualConfig" ]
 			},
 			"uci": [ "AdGuardHome" ]
 		},
 		"write": {
 			"ubus": {
-				"luci.adguardhome": [ "setVerboseLog", "startCoreUpdate", "changeWebPassword", "clearRuntimeLog", "setManualConfig" ]
+				"luci.adguardhome": [ "setVerboseLog", "startCoreUpdate", "coreBackupAction", "changeWebPassword", "clearRuntimeLog", "setManualConfig" ]
 			},
 			"uci": [ "AdGuardHome" ]
 		}

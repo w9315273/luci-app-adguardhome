@@ -65,6 +65,91 @@ msgstr "更新核心版本"
 msgid "Force update"
 msgstr "强制更新"
 
+msgid "Backup / Restore"
+msgstr "备份/恢复"
+
+msgid "Backup history"
+msgstr "备份记录"
+
+msgid "Before a core update, the core and YAML configuration are backed up together. The latest 3 automatic backups, 5 manual core backups, and 5 manual YAML backups are kept."
+msgstr "更新核心前会将核心和 YAML 配置一起备份, 保留最近 3 份自动备份. 手动核心备份和手动 YAML 备份各保留最近 5 份."
+
+msgid "Create core backup"
+msgstr "创建核心备份"
+
+msgid "Create configuration backup"
+msgstr "创建配置备份"
+
+msgctxt "AdGuard Home backup"
+msgid "Delete"
+msgstr "删除"
+
+msgid "Delete backup"
+msgstr "删除备份"
+
+msgid "Permanently delete this backup from the router?"
+msgstr "确定从路由器永久删除这份备份?"
+
+msgid "Before core update"
+msgstr "更新前自动备份"
+
+msgid "Manual backup"
+msgstr "手动备份"
+
+msgid "Legacy backup"
+msgstr "旧版备份"
+
+msgid "Restore core"
+msgstr "恢复核心"
+
+msgid "Restore configuration"
+msgstr "恢复配置"
+
+msgid "Time unavailable"
+msgstr "时间未知"
+
+msgid "Restore the core from this backup?"
+msgstr "使用此备份恢复核心?"
+
+msgid "Restore the YAML configuration from this backup?"
+msgstr "使用此备份恢复 YAML 配置?"
+
+msgid "The service will restart if enabled."
+msgstr "如果服务已启用, 恢复后会重启服务."
+
+msgid "The service will restart if enabled and the core is installed."
+msgstr "如果服务已启用且已安装核心, 恢复后会重启服务."
+
+msgid "No backups yet."
+msgstr "暂无备份."
+
+msgid "Service failed to start during restore"
+msgstr "恢复过程中服务启动失败"
+
+msgid "Backup failed"
+msgstr "备份失败"
+
+msgid "Restore failed"
+msgstr "恢复失败"
+
+msgid "Delete failed"
+msgstr "删除失败"
+
+msgid "Unable to start backup operation"
+msgstr "无法启动备份管理任务"
+
+msgid "Unable to read backup history"
+msgstr "无法读取备份记录"
+
+msgid "No core is installed."
+msgstr "未安装核心."
+
+msgid "No core is installed. YAML backups and restores will skip validation."
+msgstr "未安装核心, 备份或恢复 YAML 配置时会跳过校验."
+
+msgid "The YAML configuration file is missing."
+msgstr "找不到 YAML 配置文件."
+
 msgid "Check..."
 msgstr "检查中..."
 
@@ -177,6 +262,114 @@ msgctxt "Core update log"
 msgid "A core update is already in progress. Wait for it to finish."
 msgstr "已有更新任务正在运行, 请等待其结束."
 
+msgctxt "Core update log"
+msgid "Backing up core version"
+msgstr "正在备份核心版本"
+
+msgctxt "Core update log"
+msgid "Restoring core version"
+msgstr "正在恢复核心版本"
+
+msgctxt "Core update log"
+msgid "The installed core changed. Try again."
+msgstr "当前核心已变更, 请重试."
+
+msgctxt "Core update log"
+msgid "No working core is available to back up."
+msgstr "没有可供备份的可运行核心."
+
+msgctxt "Core update log"
+msgid "No readable YAML configuration is available to back up."
+msgstr "找不到可读取的 YAML 配置文件."
+
+msgctxt "Core update log"
+msgid "YAML validation skipped: no core is installed."
+msgstr "未安装核心, 已跳过 YAML 配置校验."
+
+msgctxt "Core update log"
+msgid "YAML configuration validation failed."
+msgstr "YAML 配置校验失败."
+
+msgctxt "Core update log"
+msgid "Failed to save the core and YAML backup."
+msgstr "保存核心和 YAML 备份失败."
+
+msgctxt "Core update log"
+msgid "Failed to save the core backup."
+msgstr "保存核心备份失败."
+
+msgctxt "Core update log"
+msgid "Failed to save the YAML backup."
+msgstr "保存配置备份失败."
+
+msgctxt "Core update log"
+msgid "Core backup saved."
+msgstr "已保存核心备份."
+
+msgctxt "Core update log"
+msgid "YAML backup saved."
+msgstr "已保存配置备份."
+
+msgctxt "Core update log"
+msgid "Could not prune the oldest automatic backup."
+msgstr "未能移除最早的自动备份."
+
+msgctxt "Core update log"
+msgid "Could not prune the oldest manual backup."
+msgstr "未能移除最早的手动备份."
+
+msgctxt "Core update log"
+msgid "Backup deleted."
+msgstr "已删除备份."
+
+msgctxt "Core update log"
+msgid "Failed to delete the selected backup."
+msgstr "未能删除所选备份."
+
+msgctxt "Core update log"
+msgid "Core and YAML backup saved."
+msgstr "已备份核心和 YAML 配置."
+
+msgctxt "Core update log"
+msgid "The selected backup is unavailable."
+msgstr "所选备份不可用."
+
+msgctxt "Core update log"
+msgid "Local core backup checksum verification failed."
+msgstr "备份中的核心文件校验失败."
+
+msgctxt "Core update log"
+msgid "The backup could not run or reported an unexpected version."
+msgstr "备份的核心无法运行或版本不符."
+
+msgctxt "Core update log"
+msgid "YAML backup checksum verification failed."
+msgstr "YAML 备份文件的 SHA-256 校验失败."
+
+msgctxt "Core update log"
+msgid "The restored service failed to start. Reverting to the previous files."
+msgstr "恢复后服务启动失败, 正在还原操作前的文件."
+
+msgctxt "Core update log"
+msgid "The previous files were restored."
+msgstr "已还原操作前的文件."
+
+msgctxt "Core update log"
+msgid "The previous files were restored, but the original service failed to start."
+msgstr "已还原操作前的文件, 原服务启动失败."
+
+msgctxt "Core update log"
+msgid "Rollback incomplete. The previous files are kept for the next attempt."
+msgstr "回滚未完成, 已保留操作前的文件供下次重试."
+
+msgctxt "Core update log"
+msgid "Could not recover the interrupted restore."
+msgstr "上次恢复中断, 本次未能还原操作前的文件."
+
+msgctxt "Core update log"
+msgid "Local backup restored."
+msgstr "本地备份已恢复."
+
 msgid "AdGuardHome Web"
 msgstr "AdGuardHome 仪表盘"
 
@@ -201,6 +394,7 @@ msgstr "密码已修改"
 msgid "Password change failed"
 msgstr "密码修改失败"
 
+msgctxt "AdGuard Home status"
 msgid "Core"
 msgstr "核心"
 

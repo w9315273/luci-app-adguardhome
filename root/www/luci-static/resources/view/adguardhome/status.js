@@ -49,6 +49,7 @@ return baseclass.extend({
 	render: function() {
 		var badgeStyle = 'display:inline-flex;align-items:center;padding:0.4em 0.8em;' +
 			'border:1px solid;border-radius:999px;font-weight:600;line-height:1.4;';
+		var coreLabel = _('Core', 'AdGuard Home status');
 		var coreBadge = E('span', { 'style': badgeStyle }, _('Collecting data...'));
 		var serviceBadge = E('span', { 'style': badgeStyle }, _('Collecting data...'));
 		var redirectBadge = E('span', { 'style': badgeStyle }, _('Collecting data...'));
@@ -68,15 +69,15 @@ return baseclass.extend({
 		function refreshCore() {
 			return callCoreInfo().then(function(info) {
 				if (!info.core_exists)
-					setBadge(coreBadge, _('Core') + ': ' + _('no core'), false);
+					setBadge(coreBadge, coreLabel + ': ' + _('no core'), false);
 				else if (!info.version)
-					setBadge(coreBadge, _('Core') + ': ' + _('core error'), false);
+					setBadge(coreBadge, coreLabel + ': ' + _('core error'), false);
 				else if (!info.config_exists)
-					setBadge(coreBadge, _('Core') + ': ' + info.version + ' (' + _('no config') + ')', false);
+					setBadge(coreBadge, coreLabel + ': ' + info.version + ' (' + _('no config') + ')', false);
 				else
-					setBadge(coreBadge, _('Core') + ': ' + info.version, true);
+					setBadge(coreBadge, coreLabel + ': ' + info.version, true);
 			}).catch(function() {
-				setBadge(coreBadge, _('Core') + ': ' + _('Status unavailable'), null);
+				setBadge(coreBadge, coreLabel + ': ' + _('Status unavailable'), null);
 			});
 		}
 

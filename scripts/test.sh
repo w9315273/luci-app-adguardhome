@@ -16,6 +16,7 @@ case "${1:-unit}" in
     ;;
   browser)
     python3 tests/run-python.py --label '详细日志开关的默认值, 保存, 失败恢复和只读状态' command python3 tests/browser/test_verbose_checkbox.py
+    python3 tests/run-python.py --label '备份时间线的操作权限, 恢复范围及所选记录' command python3 tests/browser/test_backup_timeline.py
     ;;
   sdk)
     # 使用 SDK 构建出的工具, 避免维护额外的编译器和 apk 副本.

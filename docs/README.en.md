@@ -27,7 +27,10 @@ Manage AdGuard Home in OpenWrt's LuCI interface. LuCI pages are rewritten in Jav
 
 ## Features
 
-- Service status and core updates
+- View service status and update the core. Before replacing an installed core, the updater backs up the current binary and YAML configuration together on the router, including when you force an update to the same version.
+- Under **Backup / Restore**, create separate backups of the core and YAML configuration. Select a timeline entry to restore either component offline, or use **Delete** at the end of the row to remove the whole backup. Legacy `.prev` entries support restoring the core.
+- Backups are stored alongside the binary in `<core filename>.backups/`. The router keeps the latest 3 automatic backups, 5 manual core backups, and 5 manual YAML backups. It removes older backups in the same category only after a new backup succeeds. In older manual backups that contain both the core and YAML, each component counts toward its own limit and expires independently.
+- Before backing up or restoring YAML, the plugin runs the core’s `--check-config`. A failed check stops the operation. If the core is missing, the operation continues and LuCI reports that validation was skipped.
 - DNS handling through firewall forwarding, dnsmasq upstream, or port 53 replacement
 - YAML configuration editing, validation, and web login password changes
 - Runtime logs with reverse order, local timestamps, download, and a verbose logging toggle

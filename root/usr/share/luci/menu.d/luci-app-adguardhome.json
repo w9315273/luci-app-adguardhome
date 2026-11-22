@@ -20,23 +20,34 @@
                         "acl": [ "luci-app-adguardhome" ]
                 }
         },
-        "admin/services/AdGuardHome/log": {
-                "title": "Log",
-                "order": 3,
-                "action": {
-                        "type": "view",
-                        "path": "adguardhome/log"
-                },
-                "depends": {
-                        "acl": [ "luci-app-adguardhome" ]
-                }
-        },
         "admin/services/AdGuardHome/manual": {
                 "title": "Manual Config",
                 "order": 2,
                 "action": {
                         "type": "view",
                         "path": "adguardhome/manual"
+                },
+                "depends": {
+                        "acl": [ "luci-app-adguardhome" ]
+                }
+        },
+        "admin/services/AdGuardHome/backup": {
+                "title": "Backup / Restore",
+                "order": 3,
+                "action": {
+                        "type": "view",
+                        "path": "adguardhome/backup"
+                },
+                "depends": {
+                        "acl": [ "luci-app-adguardhome" ]
+                }
+        },
+        "admin/services/AdGuardHome/log": {
+                "title": "Log",
+                "order": 4,
+                "action": {
+                        "type": "view",
+                        "path": "adguardhome/log"
                 },
                 "depends": {
                         "acl": [ "luci-app-adguardhome" ]

@@ -40,7 +40,9 @@ get_arch() {
 }
 
 core_version() {
-	"$1" --version 2>/dev/null | sed -n 's/.*version \(v[^,[:space:]]*\).*/\1/p' | head -n 1
+	local output
+	output="$("$1" --version 2>/dev/null)" || return 1
+	printf '%s\n' "$output" | sed -n 's/.*version \(v[^,[:space:]]*\).*/\1/p' | head -n 1
 }
 
 owns_web_listener() {
@@ -87,12 +89,30 @@ fetch_archive() {
 	return "$rc"
 }
 
+prepare_stage() {
+	mkdir -p "$bindir" || return 1
+	stage_dir="$(mktemp -d "$bindir/.AdGuardHome.XXXXXX")"
+}
+
+prepare_work() {
+	[ -n "$work" ] || work="$(mktemp -d /tmp/AdGuardHome-update.XXXXXX)"
+}
+
+. /usr/share/AdGuardHome/core_backup.sh
+
+restart_if_enabled() {
+	case "$(uci get AdGuardHome.AdGuardHome.enabled 2>/dev/null)" in
+	1|on|true|yes|enabled)
+		printf '\nRestarting the AdGuard Home service...\n'
+		(umask "$service_umask"; /etc/init.d/AdGuardHome restart 9>&-) && wait_for_core
+		;;
+	esac
+}
+
 update_core() {
-	local binpath bindir current version arch name asset id url digest actual
-	binpath="$(uci get AdGuardHome.AdGuardHome.binpath 2>/dev/null)"
-	binpath=${binpath:-/usr/bin/AdGuardHome/AdGuardHome}
+	local current version arch name asset id url digest actual staged
 	printf '%s\n' 'Checking for core updates...'
-	work="$(mktemp -d /tmp/AdGuardHome-update.XXXXXX)" || return 1
+	prepare_work || return 1
 	if ! uclient-fetch -T 20 -q -O "$work/release.json" "$core_api_url" ||
 	   ! version="$(jsonfilter -i "$work/release.json" -e '@.tag_name')" || [ -z "$version" ]; then
 		printf '%s\n' 'Update check failed. Check your network or try again later.'
@@ -127,13 +147,8 @@ update_core() {
 		[ "$digest" = "sha256:${actual%% *}" ] || { printf '%s\n' 'Core archive checksum verification failed.'; return 1; }
 	fi
 
-	if [ -L "$binpath" ]; then
-		binpath="$(readlink -f "$binpath")" || return 1
-	fi
-	[ ! -d "$binpath" ] || { printf '%s\n' 'The executable path points to a directory.'; return 1; }
-	bindir="$(dirname "$binpath")"
-	mkdir -p "$bindir" || return 1
-	staged="$(mktemp "$bindir/.AdGuardHome.XXXXXX")" || return 1
+	prepare_stage || return 1
+	staged="$stage_dir/core"
 	if ! tar -xzOf "$work/core.tar.gz" ./AdGuardHome/AdGuardHome >"$staged" 2>/dev/null &&
 	   ! tar -xzOf "$work/core.tar.gz" AdGuardHome/AdGuardHome >"$staged"; then
 		printf '%s\n' 'Failed to extract the core archive.'
@@ -144,36 +159,70 @@ update_core() {
 		printf '%s\n' 'The new core could not run or reported an unexpected version.'
 		return 1
 	fi
+	if [ "$(core_version "$binpath")" != "$current" ]; then
+		printf '%s\n' 'The installed core changed. Try again.'
+		return 1
+	fi
+	if [ -e "$binpath" ]; then
+		save_snapshot update "$current" || { printf '%s\n' 'Failed to save the core and YAML backup.'; return 1; }
+	fi
 	mv -f "$staged" "$binpath" || return 1
-	staged=''
-	case "$(uci get AdGuardHome.AdGuardHome.enabled 2>/dev/null)" in
-	1|on|true|yes|enabled)
-		printf '\nRestarting the AdGuard Home service...\n'
-		if ! /etc/init.d/AdGuardHome restart 9>&- || ! wait_for_core; then
-			outcome=start_failed
-			printf '%s\n' 'The new core is installed, but the service failed to start. Check the runtime log.'
-			return 1
-		fi
-		;;
-	esac
+	if ! restart_if_enabled; then
+		outcome=start_failed
+		printf '%s\n' 'The new core is installed, but the service failed to start. Check the runtime log.'
+		return 1
+	fi
 	printf '\nAdGuard Home core updated successfully.\n'
 	outcome=finished
 }
 
 cleanup() {
 	local rc=$?
-	trap - EXIT
-	[ -z "$staged" ] || rm -f "$staged"
+	trap - EXIT TERM INT HUP
+	if [ "$restore_active" = 1 ]; then
+		rollback_restore || printf '%s\n' 'Rollback incomplete. The previous files are kept for the next attempt.'
+	fi
+	[ -z "$snapshot_tmp" ] || rm -rf "$snapshot_tmp"
+	[ -z "$config_stage" ] || rm -rf "$config_stage"
+	[ -z "$stage_dir" ] || rm -rf "$stage_dir"
 	[ -z "$work" ] || rm -rf "$work"
 	printf '%s\n' "$outcome" >"$state_file"
 	exit "$rc"
 }
 
 run_update() {
-	outcome=failure work='' staged=''
+	outcome=failure work='' stage_dir='' snapshot_tmp='' config_stage='' restore_active=0
 	trap cleanup EXIT
 	trap 'exit 1' TERM INT HUP
-	update_core "$1"
+	case "$1" in
+		backup|backup-core|backup-config) outcome=backup_failed ;;
+		restore|restore-core|restore-config) outcome=restore_failed ;;
+		delete) outcome=delete_failed ;;
+	esac
+	binpath="$(uci get AdGuardHome.AdGuardHome.binpath 2>/dev/null)"
+	binpath=${binpath:-/usr/bin/AdGuardHome/AdGuardHome}
+	if [ -L "$binpath" ]; then
+		binpath="$(readlink -f "$binpath")" || return 1
+	fi
+	[ ! -d "$binpath" ] || { printf '%s\n' 'The executable path points to a directory.'; return 1; }
+	bindir="$(dirname "$binpath")"
+	backup="$binpath.prev"
+	history="$binpath.backups"
+	pending="$binpath.restore-pending"
+	service_umask="$(umask)"
+	umask 077
+	if [ "$1" = delete ]; then
+		delete_snapshot "$2" || { printf '%s\n' 'Failed to delete the selected backup.'; return 1; }
+		return 0
+	fi
+	if [ -e "$pending" ] || [ -L "$pending" ]; then
+		rollback_restore || { printf '%s\n' 'Could not recover the interrupted restore.'; return 1; }
+	fi
+	case "$1" in
+		backup|backup-core|backup-config|restore|restore-core|restore-config) local_core_action "$@" ;;
+		force|'') update_core "$1" ;;
+		*) return 1 ;;
+	esac
 }
 
 exec 9>/var/lock/AdGuardHome-update.lock || exit 1
@@ -184,7 +233,8 @@ fi
 exec >/tmp/AdGuardHome_update.log 2>&1
 printf 'running\n' >"$state_file" || exit 1
 if [ "$1" = --background ]; then
-	run_update "$2" </dev/null &
+	shift
+	run_update "$@" </dev/null &
 else
-	run_update "$1"
+	run_update "$@"
 fi
