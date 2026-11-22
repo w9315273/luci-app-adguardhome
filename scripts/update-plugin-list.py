@@ -19,14 +19,15 @@ def render_table(plugins, lang, current_repo):
     rows = ["<table>", f'  <tr><th colspan="3">{TITLES[lang]}</th></tr>']
     for plugin in sorted(plugins, key=lambda item: item["repo"] != current_repo):
         repo = escape(plugin["repo"])
+        repo_url = f"https://github.com/{repo}"
         name = escape(plugin["name"])
         badge_url = f"https://img.shields.io/github/stars/{repo}?style=flat&amp;label=%E2%98%85&amp;color=57606a"
         badge = f'<img src="{badge_url}" height="16" alt="{name} · {STAR_LABELS[lang]}">'
         if plugin["repo"] != current_repo:
-            name = f'<a href="https://github.com/{repo}">{name}</a>'
+            name = f'<a href="{repo_url}">{name}</a>'
         rows.extend([
             '  <tr valign="middle">',
-            f'    <td>{badge}</td>',
+            f'    <td><a href="{repo_url}">{badge}</a></td>',
             f"    <td><strong>{name}</strong></td>",
             f"    <td>{escape(plugin[lang])}</td>",
             "  </tr>",
