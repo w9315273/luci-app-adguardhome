@@ -10,7 +10,10 @@ esac
 [ "$#" -le 1 ] || { echo "Usage: sh install.sh [en|zh-cn]"; exit 1; }
 
 echo "Getting latest version..."
-RELEASE=$(uclient-fetch -qO- "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)
+RELEASE=$(uclient-fetch -T 20 -O - "https://api.github.com/repos/${REPO}/releases/latest") || {
+    echo "ERROR: Failed to download release information" >&2
+    exit 1
+}
 TAG=$(printf '%s\n' "$RELEASE" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
 
 [ -n "$TAG" ] || { echo "ERROR: Failed to get latest version"; exit 1; }
@@ -29,19 +32,46 @@ if printf '%s\n' "$RELEASE" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"luci-app
     PACKAGE=luci-app-adguardhome-tk
     I18N_PACKAGE=luci-i18n-adguardhome-tk-zh-cn
 fi
-URL="https://github.com/${REPO}/releases/download/${TAG}/${PACKAGE}-${VERSION}.apk"
-
 echo "Version: $VERSION"
-echo "Downloading..."
 work=$(mktemp -d /tmp/agh-install.XXXXXX)
 trap 'rm -rf "$work"' EXIT
-uclient-fetch -qO "$work/main.apk" "$URL"
+
+download_package() {
+    local name="$1" dest="$2" asset id='' digest='' sum
+    echo "Downloading $name..."
+    if command -v jsonfilter >/dev/null 2>&1; then
+        asset="@.assets[@.name=\"$name\"]"
+        id=$(printf '%s\n' "$RELEASE" | jsonfilter -e "$asset.id") || id=''
+        digest=$(printf '%s\n' "$RELEASE" | jsonfilter -e "$asset.digest") || digest=''
+    fi
+
+    case "$id" in
+        ''|*[!0-9]*) id='' ;;
+    esac
+    if [ -z "$id" ] || ! uclient-fetch -T 20 --header='Accept: application/octet-stream' \
+            -O "$dest" "https://api.github.com/repos/${REPO}/releases/assets/$id"; then
+        echo "Trying the release download URL for $name..."
+        uclient-fetch -T 20 -O "$dest" "https://github.com/${REPO}/releases/download/${TAG}/$name" || {
+            echo "ERROR: Failed to download $name" >&2
+            return 1
+        }
+    fi
+    if [ -n "$digest" ] && [ "$digest" != null ]; then
+        sum=$(sha256sum "$dest") || return 1
+        [ "$digest" = "sha256:${sum%% *}" ] || {
+            echo "ERROR: SHA-256 verification failed for $name" >&2
+            return 1
+        }
+    fi
+}
+
+download_package "${PACKAGE}-${VERSION}.apk" "$work/main.apk"
 set -- "$work/main.apk"
 
 I18N="${I18N_PACKAGE}-${VERSION}.apk"
 has_i18n=0
 if [ "$LANGUAGE" = zh-cn ] && printf '%s\n' "$RELEASE" | grep -Eq "\"name\"[[:space:]]*:[[:space:]]*\"${I18N_PACKAGE}-[^\"]*\\.apk\""; then
-    uclient-fetch -qO "$work/zh-cn.apk" "https://github.com/${REPO}/releases/download/${TAG}/${I18N}"
+    download_package "$I18N" "$work/zh-cn.apk"
     set -- "$@" "$work/zh-cn.apk"
     has_i18n=1
 fi

@@ -37,6 +37,7 @@
     "test_failure_sets_error_and_releases_lock": "更新失败时记录错误并释放锁",
     "test_background_dispatch_replaces_previous_result_before_returning": "后台更新在返回前接管状态和更新锁",
     "test_force_validation_and_service_results": "验证下载的核心并区分安装成功与服务启动失败",
+    "test_asset_api_download_and_fallback": "核心附件优先使用 API, 下载或校验失败时保留旧核心",
     "test_openwrt_architectures_match_release_asset_names": "apk 和 opkg 架构匹配官方核心附件"
   }
 }

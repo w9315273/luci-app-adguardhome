@@ -75,8 +75,20 @@ wait_for_core() {
 	return 1
 }
 
+fetch_archive() {
+	local url="$1" rc
+	shift
+	printf '下载链接: %s\n' "$url"
+	uclient-fetch -T 20 "$@" -O "$work/core.tar.gz" "$url" 2>"$work/fetch.log" && return 0
+	rc=$?
+	printf '下载失败 (uclient-fetch 退出码 %s).\n' "$rc"
+	# 仅显示最后一条诊断, 去掉重定向地址中临时签名的查询参数.
+	tail -n 1 "$work/fetch.log" | cut -d '?' -f 1
+	return "$rc"
+}
+
 update_core() {
-	local binpath bindir current version arch name asset url digest actual
+	local binpath bindir current version arch name asset id url digest actual
 	binpath="$(uci get AdGuardHome.AdGuardHome.binpath 2>/dev/null)"
 	binpath=${binpath:-/usr/bin/AdGuardHome/AdGuardHome}
 	printf '%s\n' '开始检查更新, 请耐心等待 ...'
@@ -102,10 +114,12 @@ update_core() {
 		printf '此版本未提供 %s.\n' "$name"
 		return 1
 	fi
-	printf '\n下载链接: %s\n正在下载 %s ...\n' "$url" "$name"
-	if ! uclient-fetch -T 20 -q -O "$work/core.tar.gz" "$url"; then
-		printf '%s\n' '核心下载失败, 请检查网络和系统时间.'
-		return 1
+	id="$(jsonfilter -i "$work/release.json" -e "$asset.id")"
+	case "$id" in *[!0-9]*) id='' ;; esac
+	printf '\n正在下载 %s ...\n' "$name"
+	if [ -z "$id" ] || ! fetch_archive "${core_api_url%/latest}/assets/$id" --header='Accept: application/octet-stream'; then
+		[ -z "$id" ] || printf '%s\n' '附件 API 下载失败, 正在尝试发布页直链.'
+		fetch_archive "$url" || return 1
 	fi
 	digest="$(jsonfilter -i "$work/release.json" -e "$asset.digest")"
 	if [ -n "$digest" ] && [ "$digest" != null ]; then

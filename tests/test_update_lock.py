@@ -1,4 +1,5 @@
 """隔离更新器的文件和下载命令, 验证并发与失败后的锁释放."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,12 +29,34 @@ esac
 ''')
         self.write_executable('core', '#!/bin/sh\necho "AdGuardHome version v1.2.3"\n')
         self.write_executable('uclient-fetch', '''#!/bin/sh
+while [ "$#" -gt 1 ]; do
+    case "$1" in
+        -q) shift ;;
+        -T) shift 2 ;;
+        -O) output=$2; shift 2 ;;
+        --header=*) header=${1#--header=}; shift ;;
+        --header) header=$2; shift 2 ;;
+        *) exit 2 ;;
+    esac
+done
 touch "$TEST_DIR/ready"
 while [ ! -f "$TEST_DIR/release" ]; do sleep 0.02; done
-case "$6" in
-*/latest) cp "$TEST_DIR/release.json" "$5";;
-*) cp "$TEST_DIR/core.tar.gz" "$5";;
+case "$1" in
+    */latest) exec cp "$TEST_DIR/release.json" "$output" ;;
 esac
+echo "$1" >> "$TEST_DIR/requests"
+case "$1" in
+    https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/assets/123)
+        [ "$header" = 'Accept: application/octet-stream' ] || exit 2
+        if [ "$FAIL_API" = 1 ]; then echo partial > "$output"; exit 4; fi ;;
+    https://test/core)
+        if [ "$FAIL_DIRECT" = 1 ]; then
+            echo 'Connection error: Connection timed out' >&2
+            exit 4
+        fi ;;
+    *) exit 2 ;;
+esac
+cp "$TEST_DIR/core.tar.gz" "$output"
 ''')
         self.write_executable('apk', '#!/bin/sh\necho "${ARCH:-x86_64}"\n')
         self.write_executable('jsonfilter', '''#!/usr/bin/env python3
@@ -171,6 +194,41 @@ if '-i' in sys.argv:
             self.assertTrue((self.directory / 'restarted').exists())
             self.assertEqual(self.state.read_text().strip(), 'start_failed')
             (self.directory / 'restarted').unlink()
+
+    def test_asset_api_download_and_fallback(self):
+        version = 'v1.0.0'
+        old = self.write_executable('core', '#!/bin/sh\necho "AdGuard Home, version v0.107.80"\n').read_bytes()
+        self.make_archive(version)
+        digest = 'sha256:' + hashlib.sha256((self.directory / 'core.tar.gz').read_bytes()).hexdigest()
+        (self.directory / 'release').touch()
+        self.write_executable('service', '#!/bin/sh\ntouch "$TEST_DIR/restarted"\nexit 1\n')
+        api = 'https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/assets/123'
+        direct = 'https://test/core'
+        requests = self.directory / 'requests'
+        for label, asset_id, fail_api, fail_direct, checksum, expected_urls, success in [
+            ('api', 123, False, True, digest, [api], True),
+            ('fallback', 123, True, False, digest, [api, direct], True),
+            ('invalid-id', 'bad', False, False, digest, [direct], True),
+            ('both-failed', 123, True, True, digest, [api, direct], False),
+            ('checksum', 123, False, False, 'sha256:bad', [api], False),
+        ]:
+            with self.subTest(label=label):
+                self.set_release(version, id=asset_id, digest=checksum)
+                (self.directory / 'core').write_bytes(old)
+                requests.unlink(missing_ok=True)
+                self.env.update(FAIL_API=str(int(fail_api)), FAIL_DIRECT=str(int(fail_direct)),
+                                ENABLED='0' if success else '1')
+                proc = self.start()
+                proc.communicate(timeout=5)
+                self.assertEqual(requests.read_text().splitlines(), expected_urls)
+                self.assertEqual(proc.returncode, 0 if success else 1)
+                self.assertEqual(self.state.read_text().strip(), 'finished' if success else 'failure')
+                expected_core = (self.directory / 'candidate').read_bytes() if success else old
+                self.assertEqual((self.directory / 'core').read_bytes(), expected_core)
+                self.assertFalse((self.directory / 'restarted').exists())
+                if label == 'both-failed':
+                    log = (self.directory / 'AdGuardHome_update.log').read_text()
+                    self.assertIn('Connection timed out', log)
 
     def test_openwrt_architectures_match_release_asset_names(self):
         source = self.script.read_text()

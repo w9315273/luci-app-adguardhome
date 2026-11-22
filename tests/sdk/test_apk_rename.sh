@@ -32,12 +32,17 @@ exec "$APK" --root "$TEST_ROOT" --no-network "$@"
 SH
 cat > bin/uclient-fetch <<'SH'
 #!/bin/sh
-if [ "$1" = -qO- ]; then
+if [ "$1" = -T ]; then shift 2; fi
+[ "$1" = -O ] || exit 2
+case "$3" in
+*/releases/latest)
     printf '{\n"tag_name": "v2.6.0-1",\n"assets": [\n{"name": "luci-app-adguardhome-tk-2.6.0-r1.apk"},\n{"name": "luci-i18n-adguardhome-tk-zh-cn-2.6.0-r1.apk"}\n]}\n'
-else
+    ;;
+*)
     case "$3" in *luci-i18n*) [ "${FAIL_DOWNLOAD:-0}" != 1 ] || exit 1 ;; esac
     cp "$TEST_DIR/pkgs/${3##*/}" "$2"
-fi
+    ;;
+esac
 SH
 chmod +x bin/*
 export PATH="$TEST_DIR/bin:$PATH"
