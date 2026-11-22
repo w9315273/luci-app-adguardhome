@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import tarfile
@@ -35,6 +36,7 @@ esac
         self.yaml.parent.mkdir()
         self.yaml.write_bytes(b'http:\n  address: 127.0.0.1:3000\n')
         self.history = self.directory / 'core.backups'
+        self.uploads = self.directory / 'uploads'
         self.write_executable('uclient-fetch', '''#!/bin/sh
 while [ "$#" -gt 1 ]; do
     case "$1" in
@@ -86,6 +88,7 @@ if '-i' in sys.argv:
         helper.write_text((scripts / helper.name).read_text().replace('/etc/init.d/AdGuardHome', '"$TEST_DIR/service"'))
         source = (scripts / 'update_core.sh').read_text()
         source = source.replace('/usr/share/AdGuardHome/core_backup.sh', str(helper))
+        source = source.replace('/var/run/AdGuardHome-uploads', str(self.uploads))
         source = source.replace('PATH="/usr/sbin:/usr/bin:/sbin:/bin"',
                                 'PATH="$TEST_DIR:/usr/bin:/bin"')
         for path in ['/var/lock/AdGuardHome-update.lock', '/var/run/AdGuardHome-update.state',
@@ -169,7 +172,7 @@ args.config.write_text('schema_version: migrated\\n')
         before = self.log.read_bytes()
         for args in [(), ('force',), ('--background', 'backup-core'), ('backup-config',),
                      ('restore-core', 'legacy'), ('restore-config', '1800000000-0001'),
-                     ('--background', 'delete', 'legacy')]:
+                     ('--background', 'delete', 'legacy'), ('--background', 'upload', 'ABC123')]:
             contender = self.start(*args)
             contender.communicate(timeout=5)
             self.assertEqual(contender.returncode, 2)
@@ -209,6 +212,121 @@ args.config.write_text('schema_version: migrated\\n')
         metadata = self.directory / 'core.prev.meta'
         metadata.write_text('v1.2.3 ' + hashlib.sha256(image.read_bytes()).hexdigest() + '\n')
         return image, metadata
+
+    def upload_payload(self):
+        self.uploads.mkdir(mode=0o700, exist_ok=True)
+        ready = self.uploads / 'ready.ABC123'
+        ready.mkdir(mode=0o700)
+        return ready / 'payload'
+
+    def test_uploaded_core_installs_offline_and_validates_config_before_backup(self):
+        candidate = self.directory / 'fixture-elf'
+        subprocess.run(['cc', '-x', 'c', '-', '-o', candidate], check=True, input=b'''
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts(getenv("WRONG_VERSION") ? "fixture version v7.8.9" : "AdGuard Home, version v7.8.9-test");
+        return 0;
+    }
+    return argc > 2 && strcmp(argv[1], "--check-config") == 0 && !getenv("INVALID_CONFIG") ? 0 : 1;
+}
+''')
+        # 用单独的命令模拟 Go 构建记录. 测试 ELF 本身不会被真实更新器当作核心安装.
+        self.write_executable('strings', '''#!/bin/sh
+cmp -s "$1" "$TEST_DIR/fixture-elf" || exit 1
+printf 'path\tgithub.com/AdguardTeam/AdGuardHome\nbuild\tGOOS=linux\n'
+''')
+        self.write_executable('uclient-fetch', '#!/bin/sh\ntouch "$TEST_DIR/network-used"\nexit 1\n')
+        original_core, yaml = self.core.read_bytes(), self.yaml.read_bytes()
+        for flag in ('WRONG_VERSION', 'INVALID_CONFIG'):
+            self.env[flag] = '1'
+            payload = self.upload_payload()
+            shutil.copyfile(candidate, payload)
+            self.check_action('failure', 'upload', 'ABC123', returncode=1)
+            self.assertFalse(payload.parent.exists() or self.entries())
+            self.assertEqual(self.core.read_bytes(), original_core)
+            del self.env[flag]
+
+        for member in ('', './AdGuardHome/AdGuardHome', 'AdGuardHome/AdGuardHome'):
+            with self.subTest(member=member):
+                payload = self.upload_payload()
+                if member:
+                    with tarfile.open(payload, 'w:gz') as archive:
+                        archive.add(candidate, arcname=member)
+                else:
+                    shutil.copyfile(candidate, payload)
+                checksum = hashlib.sha256(payload.read_bytes()).hexdigest()
+                backup = self.check_new_entry('finished', 'upload', 'ABC123', checksum.upper() if member else checksum)
+                self.assert_snapshot(backup, 'update', 'v7.8.9-test' if member else 'v1.2.3', original_core, yaml)
+                self.assertIn('Uploaded file SHA-256 verified.', self.log.read_text())
+                self.assertIn('Uploaded AdGuard Home version: v7.8.9-test', self.log.read_text())
+                self.assertEqual(self.core.read_bytes(), candidate.read_bytes())
+                self.assertFalse(payload.parent.exists() or (self.directory / 'network-used').exists())
+                original_core = candidate.read_bytes()
+        self.core.unlink()
+        self.yaml.unlink()
+        backups = self.entries()
+        shutil.copyfile(candidate, self.upload_payload())
+        self.check_action('finished', 'upload', 'ABC123', '')
+        self.assertNotIn('SHA-256', self.log.read_text())
+        self.assertEqual(self.entries(), backups)
+        self.assertFalse(self.yaml.exists())
+
+    def test_uploaded_file_sha256_failure_stops_before_extraction_or_install(self):
+        original_core, yaml = self.core.read_bytes(), self.yaml.read_bytes()
+        self.env['ENABLED'] = '1'
+        self.write_executable('tar', '#!/bin/sh\ntouch "$TEST_DIR/extracted"\nexit 1\n')
+        self.write_executable('service', '#!/bin/sh\ntouch "$TEST_DIR/service-used"\nexit 1\n')
+        self.make_archive('v1.2.4')
+        archive = self.directory / 'core.tar.gz'
+        core_digest = hashlib.sha256((self.directory / 'candidate').read_bytes()).hexdigest()
+        for source, digest in ((self.core, '0' * 64), (archive, core_digest),
+                               (archive, 'abc'), (archive, 'g' * 64)):
+            with self.subTest(source=source.name, digest=digest):
+                payload = self.upload_payload()
+                shutil.copyfile(source, payload)
+                self.check_action('failure', 'upload', 'ABC123', digest, returncode=1)
+                self.assertIn('Uploaded file SHA-256 verification failed.', self.log.read_text())
+                self.assertFalse(payload.parent.exists() or self.entries())
+                self.assertFalse((self.directory / 'extracted').exists() or (self.directory / 'service-used').exists())
+                self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), (original_core, yaml))
+
+    def test_uploaded_core_rejects_unrelated_files_archives_and_oversize_payloads(self):
+        original_core, yaml = self.core.read_bytes(), self.yaml.read_bytes()
+        # 为大小限制测试使用同一套代码, 以较小数据覆盖压缩和解压后的边界.
+        self.script.write_text(self.script.read_text().replace('upload_limit=134217728', 'upload_limit=65536'))
+        for kind in ('script', 'unrelated', 'foreign', 'empty', 'large', 'archive', 'expanded', 'symlink'):
+            with self.subTest(kind=kind):
+                p = self.upload_payload()
+                if kind == 'script':
+                    p.write_text('#!/bin/sh\necho fixture\n')
+                elif kind in ('unrelated', 'foreign'):
+                    elf = bytearray(Path('/bin/true').read_bytes())
+                    if kind == 'foreign':
+                        elf[5] = 3 - elf[5]
+                    p.write_bytes(elf)
+                elif kind == 'symlink':
+                    p.symlink_to(self.yaml)
+                elif kind in ('large', 'empty'):
+                    p.write_bytes(b'x' * (65537 if kind == 'large' else 0))
+                else:
+                    data = self.directory / 'packed'
+                    data.write_bytes(b'a' * (66000 if kind == 'expanded' else 16))
+                    with tarfile.open(p, 'w:gz') as archive:
+                        archive.add(data, arcname='AdGuardHome/AdGuardHome' if kind == 'expanded' else 'other')
+                self.check_action('failure', 'upload', 'ABC123', returncode=1)
+                self.assertFalse(p.parent.exists() or self.entries())
+                self.assertEqual((self.core.read_bytes(), self.yaml.read_bytes()), (original_core, yaml))
+                if kind == 'unrelated':
+                    self.assertIn('not an AdGuard Home Linux core', self.log.read_text())
+                if kind == 'expanded':
+                    self.assertIn('128 MiB limit', self.log.read_text())
+        p = self.upload_payload()
+        p.write_bytes(b'private')
+        self.check_action('failure', 'upload', '../ready.ABC123', returncode=1)
+        self.assertEqual(p.read_bytes(), b'private')
 
     def test_update_snapshots_previous_pair_after_validation(self):
         old_yaml = self.yaml.read_bytes()

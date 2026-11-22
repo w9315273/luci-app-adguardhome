@@ -1,7 +1,7 @@
 #!/usr/bin/ucode
 'use strict';
 
-import { stat, lstat, readlink, dirname, open, popen, readfile, writefile, unlink, lsdir } from 'fs';
+import { stat, lstat, readlink, dirname, basename, open, popen, readfile, writefile, unlink, lsdir, mkdir, mkdtemp, rmdir, rename } from 'fs';
 import { cursor } from 'uci';
 
 function shellQuote(value) {
@@ -101,12 +101,59 @@ function getBackupHistory() {
 	return result;
 }
 
-function startCoreTask(action, backupId) {
+function startCoreTask(action, id, sha256) {
 	const args = ['/bin/sh', '/usr/share/AdGuardHome/update_core.sh', '--background', action];
-	if (backupId != null)
-		push(args, backupId);
+	if (id != null)
+		push(args, id);
+	if (sha256)
+		push(args, sha256);
 	const rc = system(args, 3000);
 	return { started: rc == 0, reason: rc == 2 ? 'busy' : rc ? 'error' : '' };
+}
+
+const uploadRoot = '/var/run/AdGuardHome-uploads';
+
+function clearUpload(dir) {
+	unlink(dir + '/payload');
+	unlink(dir + '/.session');
+	return rmdir(dir);
+}
+
+function prepareCoreUpload(request) {
+	mkdir(uploadRoot, 0o700);
+	const root = lstat(uploadRoot);
+	if (root?.type != 'directory' || root.uid != 0 || root.mode != 0o700)
+		return {};
+
+	// 页面关闭时可能来不及取消, 仅回收一小时未使用的待上传目录.
+	for (let name in (lsdir(uploadRoot) || [])) {
+		if (!match(name, /^[A-Za-z0-9]{6}$/))
+			continue;
+		const path = uploadRoot + '/' + name;
+		const info = lstat(path);
+		if (info?.type == 'directory' && info.mtime < time() - 3600)
+			clearUpload(path);
+	}
+
+	const dir = mkdtemp(uploadRoot + '/XXXXXX');
+	if (!dir)
+		return {};
+	if (writefile(dir + '/.session', request.args.ubus_rpc_session || 'local') == null) {
+		clearUpload(dir);
+		return {};
+	}
+	return { token: basename(dir), path: dir + '/payload' };
+}
+
+function ownedUpload(request) {
+	const token = request.args.token;
+	if (!match(token || '', /^[A-Za-z0-9]{6}$/))
+		return null;
+	const path = uploadRoot + '/' + token;
+	if (lstat(path)?.type != 'directory' ||
+	    readfile(path + '/.session', 33) != (request.args.ubus_rpc_session || 'local'))
+		return null;
+	return path;
 }
 
 return {
@@ -233,6 +280,39 @@ return {
 			args: { force: false },
 			call: function(request) {
 				return startCoreTask(request.args.force ? 'force' : '');
+			}
+		},
+		prepareCoreUpload: { call: prepareCoreUpload },
+		startCoreUpload: {
+			args: { token: '', sha256: '' },
+			call: function(request) {
+				const dir = ownedUpload(request);
+				if (!dir)
+					return { started: false, reason: 'invalid_upload' };
+				const digest = lc(trim(request.args.sha256 || ''));
+				const sha256 = match(digest, /^(sha256:)?([0-9a-f]{64})$/);
+				if (digest && !sha256)
+					return { started: false, reason: 'invalid_sha256' };
+				const file = lstat(dir + '/payload');
+				if (file?.type != 'file' || file.size < 1 || file.size > 128 * 1024 * 1024)
+					return { started: false, reason: 'invalid_upload' };
+
+				// 交接后的目录不在 CGI 可写路径内, 也不再接受页面的取消请求.
+				const ready = uploadRoot + '/ready.' + request.args.token;
+				if (lstat(ready) || !rename(dir, ready))
+					return { started: false, reason: 'error' };
+				unlink(ready + '/.session');
+				const result = startCoreTask('upload', request.args.token, sha256?.[2]);
+				if (!result.started)
+					clearUpload(ready);
+				return result;
+			}
+		},
+		cancelCoreUpload: {
+			args: { token: '' },
+			call: function(request) {
+				const dir = ownedUpload(request);
+				return { cancelled: dir ? !!clearUpload(dir) : false };
 			}
 		},
 		getBackupHistory: {

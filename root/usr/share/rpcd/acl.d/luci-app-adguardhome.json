@@ -12,8 +12,12 @@
 			"uci": [ "AdGuardHome" ]
 		},
 		"write": {
+			"cgi-io": [ "upload" ],
+			"file": {
+				"/var/run/AdGuardHome-uploads/[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]/payload": [ "write" ]
+			},
 			"ubus": {
-				"luci.adguardhome": [ "setVerboseLog", "startCoreUpdate", "coreBackupAction", "changeWebPassword", "clearRuntimeLog", "setManualConfig" ]
+				"luci.adguardhome": [ "setVerboseLog", "startCoreUpdate", "prepareCoreUpload", "startCoreUpload", "cancelCoreUpload", "coreBackupAction", "changeWebPassword", "clearRuntimeLog", "setManualConfig" ]
 			},
 			"uci": [ "AdGuardHome" ]
 		}

@@ -32,6 +32,9 @@
     "test_stop_core_deletes_crashed_instance_without_pid": "清理没有 PID 的已崩溃核心实例"
   },
   "UpdateLockTests": {
+    "test_uploaded_core_installs_offline_and_validates_config_before_backup": "离线安装上传的核心或压缩包, 验证版本与现有配置后才备份和替换",
+    "test_uploaded_core_rejects_unrelated_files_archives_and_oversize_payloads": "拒绝非核心程序, 错误架构及过大或无效的上传文件, 保留现有文件",
+    "test_uploaded_file_sha256_failure_stops_before_extraction_or_install": "手动上传的文件未通过 SHA-256 校验时, 在解压和安装前停止",
     "test_normal_and_force_contenders_preserve_owner_state": "更新, 备份, 恢复和删除竞争时保留当前任务状态",
     "test_update_snapshots_previous_pair_after_validation": "核心更新和强制重装前备份完整的核心与 YAML, 首装和无更新时跳过",
     "test_manual_restore_selects_pair_by_id_offline": "离线恢复选中的历史版本及 YAML, 兼容自定义路径和符号链接",

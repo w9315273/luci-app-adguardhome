@@ -2,6 +2,7 @@
 'require view';
 'require form';
 'require poll';
+'require request';
 'require rpc';
 'require ui';
 'require view/adguardhome/status as status';
@@ -26,6 +27,16 @@ var callStartCoreUpdate = rpc.declare({
 	params: [ 'force' ],
 	expect: { '': {} },
 	reject: true
+});
+
+var callPrepareCoreUpload = rpc.declare({
+	object: 'luci.adguardhome', method: 'prepareCoreUpload', expect: { '': {} }, reject: true
+});
+var callStartCoreUpload = rpc.declare({
+	object: 'luci.adguardhome', method: 'startCoreUpload', params: [ 'token', 'sha256' ], expect: { '': {} }, reject: true
+});
+var callCancelCoreUpload = rpc.declare({
+	object: 'luci.adguardhome', method: 'cancelCoreUpload', params: [ 'token' ], reject: true
 });
 
 function localizeUpdateLog(log) {
@@ -159,11 +170,25 @@ return view.extend({
 
 			var updateButton = E('button', {
 				'class': 'btn cbi-button cbi-button-apply', 'type': 'button'
-			}, _('Update core version'));
+			}, _('Update core'));
 			var forceButton = E('button', {
 				'class': 'btn cbi-button', 'type': 'button'
 			}, _('Force update'));
+			var uploadButton = E('button', {
+				'class': 'btn cbi-button', 'type': 'button'
+			}, _('Upload core'));
 			var updateMessage = E('span', {}, '');
+			var fileInput = E('input', { 'class': 'cbi-input-file', 'type': 'file', 'aria-label': _('Core file') });
+			var fileError = E('p', { 'role': 'alert' });
+			var digestInput = E('input', {
+				'class': 'cbi-input-text', 'id': 'agh-upload-sha256', 'type': 'text',
+				'autocomplete': 'off', 'autocapitalize': 'none', 'spellcheck': 'false',
+				'aria-describedby': 'agh-upload-sha256-error'
+			});
+			var digestError = E('p', { 'id': 'agh-upload-sha256-error', 'role': 'alert' });
+			var installButton = E('button', {
+				'class': 'btn cbi-button cbi-button-apply', 'type': 'button'
+			}, _('Upload and install'));
 			var reverseLog = E('input', { 'type': 'checkbox' });
 			var updateLog = E('textarea', {
 				'class': 'cbi-input-textarea agh-update-log', 'rows': 8, 'readonly': 'readonly',
@@ -175,12 +200,13 @@ return view.extend({
 			var updatePanel = E('div', { 'class': 'cbi-value' }, [
 				E('div', { 'class': 'cbi-value-title' }, _('Upgrade Core')),
 				E('div', { 'class': 'cbi-value-field' }, E('div', { 'class': 'agh-update-content' }, [
-					E('div', { 'class': 'agh-toolbar' }, [updateButton, forceButton, updateMessage]),
+					E('div', { 'class': 'agh-toolbar' }, [updateButton, forceButton, uploadButton, updateMessage]),
 					logOptions, updateLog
 				]))
 			]);
 			var lastLog = '';
 			var starting = false;
+			var startError = '';
 			var statusRequest = 0;
 			var activeUpdate = false;
 			var updateFinishedHere = false;
@@ -195,8 +221,29 @@ return view.extend({
 				delete_failed: _('Delete failed')
 			};
 
+			function selectedDigest() {
+				var value = digestInput.value.trim();
+				if (!value)
+					return '';
+				var match = /^(?:sha256:)?([0-9a-f]{64})$/i.exec(value);
+				return match ? match[1].toLowerCase() : null;
+			}
+
+			function updateSelection() {
+				var file = fileInput.files[0];
+				var invalid = file && (file.size === 0 || file.size > 128 * 1024 * 1024);
+				var invalidDigest = selectedDigest() === null;
+				fileError.hidden = !invalid;
+				fileError.textContent = invalid ? _('Choose a non-empty file of up to 128 MiB.') : '';
+				digestError.hidden = !invalidDigest;
+				digestError.textContent = invalidDigest ? _('Enter 64 hexadecimal characters with or without the sha256: prefix.') : '';
+				digestInput.setAttribute('aria-invalid', String(invalidDigest));
+				installButton.disabled = uploadButton.disabled || !file || invalid || invalidDigest;
+			}
+
 			function setBusy(busy) {
-				updateButton.disabled = forceButton.disabled = !!(busy || m.readonly);
+				updateButton.disabled = forceButton.disabled = uploadButton.disabled = !!(busy || m.readonly);
+				updateSelection();
 			}
 			setBusy(false);
 
@@ -207,9 +254,10 @@ return view.extend({
 
 			function showUpdateStatus(result) {
 				var state = result.state || 'idle';
-				if (state === 'running')
+				if (state === 'running') {
+					startError = '';
 					activeUpdate = true;
-				else if (activeUpdate && state !== 'idle') {
+				} else if (activeUpdate && state !== 'idle') {
 					activeUpdate = false;
 					updateFinishedHere = true;
 					sharedStatus.refresh();
@@ -223,7 +271,7 @@ return view.extend({
 					updateLog.style.display = lastLog ? 'block' : 'none';
 					showLog();
 				} else {
-					updateMessage.textContent = '';
+					updateMessage.textContent = startError;
 					lastLog = '';
 					logOptions.style.display = updateLog.style.display = 'none';
 				}
@@ -242,17 +290,20 @@ return view.extend({
 				});
 			}
 
-			function startUpdate(force) {
+			function runUpdate(start, message, failure) {
+				if (updateButton.disabled)
+					return;
 				starting = true;
+				startError = '';
 				statusRequest++;
 				activeUpdate = true;
 				updateFinishedHere = false;
 				setBusy(true);
-				updateMessage.textContent = _('Check...');
+				updateMessage.textContent = message;
 				lastLog = '';
 				showLog();
 				updateLog.style.display = logOptions.style.display = 'none';
-				callStartCoreUpdate(force).then(function(result) {
+				return start().then(function(result) {
 					starting = false;
 					if (!result.started && result.reason !== 'busy')
 						throw new Error();
@@ -263,12 +314,78 @@ return view.extend({
 					starting = false;
 					activeUpdate = false;
 					setBusy(false);
-					updateMessage.textContent = _('Unable to start update');
+					startError = failure;
+					updateMessage.textContent = startError;
 				});
 			}
 
-			updateButton.addEventListener('click', function() { startUpdate(false); });
-			forceButton.addEventListener('click', function() { startUpdate(true); });
+			function startUpdate(force) {
+				return runUpdate(function() { return callStartCoreUpdate(force); }, _('Check...'), _('Unable to start update'));
+			}
+
+			async function uploadCore(file, digest) {
+				var upload = await callPrepareCoreUpload();
+				if (!upload.token || !upload.path)
+					throw new Error();
+
+				var started = false;
+				try {
+					var data = new FormData();
+					data.append('sessionid', rpc.getSessionID());
+					data.append('filename', upload.path);
+					data.append('filedata', file);
+					var response = await request.post(L.env.cgi_base + '/cgi-upload', data, {
+						timeout: 0,
+						progress: function(event) {
+							if (event.lengthComputable && event.total > 0)
+								updateMessage.textContent = _('Uploading core...') + ' ' + Math.floor(event.loaded * 100 / event.total) + '%';
+						}
+					});
+					var receipt = response.json();
+					if (!response.ok || !receipt || receipt.failure || Number(receipt.size) !== file.size)
+						throw new Error();
+					var result = await callStartCoreUpload(upload.token, digest);
+					started = result.started;
+					if (!started && result.reason === 'busy')
+						ui.addNotification(null, E('p', {}, _('Another core task is running. Try uploading again when it finishes.')));
+					return result;
+				} finally {
+					if (!started)
+						await callCancelCoreUpload(upload.token).catch(function() {});
+				}
+			}
+
+			fileInput.addEventListener('change', updateSelection);
+			digestInput.addEventListener('input', updateSelection);
+			installButton.addEventListener('click', function() {
+				var digest = selectedDigest();
+				if (installButton.disabled || digest === null)
+					return;
+				var file = fileInput.files[0];
+				ui.hideModal();
+				fileInput.value = '';
+				return runUpdate(function() { return uploadCore(file, digest); }, _('Uploading core...'), _('Unable to upload or install the core.'));
+			});
+			uploadButton.addEventListener('click', function() {
+				if (uploadButton.disabled)
+					return;
+				fileInput.value = '';
+				digestInput.value = '';
+				updateSelection();
+				ui.showModal(_('Upload core'), [
+					E('p', {}, _('Choose the AdGuard Home Linux binary or its official .tar.gz archive for this device (up to 128 MiB). Use a trusted source.')),
+					fileInput, fileError,
+					E('div', { 'class': 'agh-upload-digest' }, [
+						E('label', { 'for': digestInput.id }, _('File SHA-256 (optional)')),
+						digestInput, digestError
+					]),
+					E('div', { 'class': 'right' }, [
+						E('button', { 'class': 'btn', 'type': 'button', 'click': ui.hideModal }, _('Cancel')), ' ', installButton
+					])
+				]);
+			});
+			updateButton.addEventListener('click', function() { return startUpdate(false); });
+			forceButton.addEventListener('click', function() { return startUpdate(true); });
 			poll.add(refreshUpdate, 3);
 			var settingsCard = node.querySelector('.cbi-section');
 			settingsCard.classList.add('agh-compact-card', 'agh-base-card');

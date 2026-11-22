@@ -24,6 +24,16 @@
 	max-width: 40rem;
 	min-width: 0;
 }
+.agh-upload-digest {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 0.25rem;
+}
+.agh-upload-digest > input {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+}
 .agh-compact-card .agh-update-options {
 	align-items: center;
 	gap: 0.35rem;

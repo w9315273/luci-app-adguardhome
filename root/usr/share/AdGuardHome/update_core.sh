@@ -3,6 +3,8 @@
 PATH="/usr/sbin:/usr/bin:/sbin:/bin"
 state_file=/var/run/AdGuardHome-update.state
 core_api_url="https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
+upload_root=/var/run/AdGuardHome-uploads
+upload_limit=134217728
 
 get_arch() {
 	local arch machine
@@ -41,7 +43,11 @@ get_arch() {
 
 core_version() {
 	local output
-	output="$("$1" --version 2>/dev/null)" || return 1
+	output="$("$1" --version 9>&- 2>/dev/null)" || return 1
+	if [ "$2" = upload ]; then
+		printf '%s\n' "$output" | sed -nE 's/^AdGuard Home,? version (v[0-9]+\.[0-9]+\.[0-9]+[[:alnum:].+~-]*)([, ].*)?$/\1/p' | head -n 1
+		return
+	fi
 	printf '%s\n' "$output" | sed -n 's/.*version \(v[^,[:space:]]*\).*/\1/p' | head -n 1
 }
 
@@ -109,6 +115,103 @@ restart_if_enabled() {
 	esac
 }
 
+extract_core() {
+	tar -xzOf "$1" ./AdGuardHome/AdGuardHome >"$2" 2>/dev/null ||
+		tar -xzOf "$1" AdGuardHome/AdGuardHome >"$2" 2>/dev/null
+}
+
+install_core() {
+	local current="$1" staged="$2"
+	if [ "$(core_version "$binpath")" != "$current" ]; then
+		printf '%s\n' 'The installed core changed. Try again.'
+		return 1
+	fi
+	if [ -e "$binpath" ]; then
+		save_snapshot update "$current" || { printf '%s\n' 'Failed to save the core and YAML backup.'; return 1; }
+	fi
+	mv -f "$staged" "$binpath" || return 1
+	if ! restart_if_enabled; then
+		outcome=start_failed
+		printf '%s\n' 'The new core is installed, but the service failed to start. Check the runtime log.'
+		return 1
+	fi
+	printf '\nAdGuard Home core updated successfully.\n'
+	outcome=finished
+}
+
+elf_arch() {
+	# 只比较 ELF 标识, 位数, 字节序及机器类型. 静态核心和动态 shell 的 ABI 标记可能不同.
+	hexdump -v -n 20 -e '1/1 "%02x"' "$1" | cut -c1-12,37-40
+}
+
+upload_core() {
+	local payload="$upload_dir/payload" expected="$1" actual staged size magic arch current version
+	printf '%s\n' 'Validating the uploaded core...'
+	if ! regular_file "$payload" || ! size="$(wc -c < "$payload")" || [ "$size" -le 0 ] || [ "$size" -gt "$upload_limit" ]; then
+		printf '%s\n' 'The uploaded file is missing, empty, or exceeds 128 MiB.'
+		return 1
+	fi
+	prepare_stage || return 1
+	staged="$stage_dir/core"
+	if [ -n "$expected" ]; then
+		# 校验和安装使用同一份私有副本, 已打开上传文件的 CGI 请求无法再改变其内容.
+		(ulimit -f "$((upload_limit / 512))" && cp "$payload" "$stage_dir/upload") || return 1
+		rm -f "$payload" || return 1
+		payload="$stage_dir/upload"
+		if [ "${#expected}" -ne 64 ] || ! actual="$(file_hash "$payload")" ||
+		   [ "$actual" != "$(printf '%s' "$expected" | tr 'A-F' 'a-f')" ]; then
+			printf '%s\n' 'Uploaded file SHA-256 verification failed.'
+			return 1
+		fi
+		printf '%s\n' 'Uploaded file SHA-256 verified.'
+	fi
+	current="$(core_version "$binpath")"
+	magic="$(hexdump -v -n 4 -e '1/1 "%02x"' "$payload")" || return 1
+	# ash 的文件大小限制以 512 字节为单位, 在暂存文件增长前就限制空间.
+	case "$magic" in
+		7f454c46)
+			if [ -n "$expected" ]; then
+				mv "$payload" "$staged" || return 1
+			else
+				(ulimit -f "$((upload_limit / 512))" && cp "$payload" "$staged") || return 1
+			fi ;;
+		1f8b*)
+			if ! (ulimit -f "$((upload_limit / 512))" && extract_core "$payload" "$staged") ||
+			   [ ! -s "$staged" ] || [ "$(wc -c < "$staged")" -gt "$upload_limit" ]; then
+				printf '%s\n' 'Failed to extract the core archive within the 128 MiB limit.'
+				return 1
+			fi ;;
+		*) printf '%s\n' 'Select an AdGuard Home Linux binary or its official .tar.gz archive.'; return 1 ;;
+	esac
+	rm -f "$payload" || return 1
+	arch="$(elf_arch "$staged")"
+	if [ "${arch#7f454c46}" = "$arch" ] || [ "$arch" != "$(elf_arch /bin/sh)" ]; then
+		printf '%s\n' 'The uploaded core does not match the device architecture.'
+		return 1
+	fi
+	# 读取 Go 的主模块和目标系统, 在执行版本命令前识别传错的其他 Linux 程序.
+	if ! LC_ALL=C strings "$staged" | awk -F '\t' '
+		$1 == "path" && $2 == "github.com/AdguardTeam/AdGuardHome" { agh = 1 }
+		$1 == "build" && $2 == "GOOS=linux" { linux = 1 }
+		END { exit !(agh && linux) }
+	'; then
+		printf '%s\n' 'The uploaded file is not an AdGuard Home Linux core.'
+		return 1
+	fi
+	chmod 755 "$staged" || return 1
+	version="$(core_version "$staged" upload)"
+	if [ -z "$version" ]; then
+		printf '%s\n' 'The new core could not run or reported an unexpected version.'
+		return 1
+	fi
+	printf 'Uploaded AdGuard Home version: %s\n' "$version"
+	resolve_config || { printf '%s\n' 'The configured YAML file is not readable.'; return 1; }
+	if [ -e "$configpath" ]; then
+		check_snapshot_yaml "$staged" "$configpath" || return 1
+	fi
+	install_core "$current" "$staged"
+}
+
 update_core() {
 	local current version arch name asset id url digest actual staged
 	printf '%s\n' 'Checking for core updates...'
@@ -149,8 +252,7 @@ update_core() {
 
 	prepare_stage || return 1
 	staged="$stage_dir/core"
-	if ! tar -xzOf "$work/core.tar.gz" ./AdGuardHome/AdGuardHome >"$staged" 2>/dev/null &&
-	   ! tar -xzOf "$work/core.tar.gz" AdGuardHome/AdGuardHome >"$staged"; then
+	if ! extract_core "$work/core.tar.gz" "$staged"; then
 		printf '%s\n' 'Failed to extract the core archive.'
 		return 1
 	fi
@@ -159,21 +261,7 @@ update_core() {
 		printf '%s\n' 'The new core could not run or reported an unexpected version.'
 		return 1
 	fi
-	if [ "$(core_version "$binpath")" != "$current" ]; then
-		printf '%s\n' 'The installed core changed. Try again.'
-		return 1
-	fi
-	if [ -e "$binpath" ]; then
-		save_snapshot update "$current" || { printf '%s\n' 'Failed to save the core and YAML backup.'; return 1; }
-	fi
-	mv -f "$staged" "$binpath" || return 1
-	if ! restart_if_enabled; then
-		outcome=start_failed
-		printf '%s\n' 'The new core is installed, but the service failed to start. Check the runtime log.'
-		return 1
-	fi
-	printf '\nAdGuard Home core updated successfully.\n'
-	outcome=finished
+	install_core "$current" "$staged"
 }
 
 cleanup() {
@@ -186,15 +274,24 @@ cleanup() {
 	[ -z "$config_stage" ] || rm -rf "$config_stage"
 	[ -z "$stage_dir" ] || rm -rf "$stage_dir"
 	[ -z "$work" ] || rm -rf "$work"
+	if [ -n "$upload_dir" ]; then
+		rm -f "$upload_dir/payload"
+		rmdir "$upload_dir"
+	fi
 	printf '%s\n' "$outcome" >"$state_file"
 	exit "$rc"
 }
 
 run_update() {
-	outcome=failure work='' stage_dir='' snapshot_tmp='' config_stage='' restore_active=0
+	outcome=failure work='' stage_dir='' snapshot_tmp='' config_stage='' upload_dir='' restore_active=0
 	trap cleanup EXIT
 	trap 'exit 1' TERM INT HUP
 	case "$1" in
+		upload)
+			case "$2" in ??????) ;; *) return 1 ;; esac
+			case "$2" in *[!a-zA-Z0-9]*) return 1 ;; esac
+			private_dir "$upload_root" && private_dir "$upload_root/ready.$2" || return 1
+			upload_dir="$upload_root/ready.$2" ;;
 		backup|backup-core|backup-config) outcome=backup_failed ;;
 		restore|restore-core|restore-config) outcome=restore_failed ;;
 		delete) outcome=delete_failed ;;
@@ -219,6 +316,7 @@ run_update() {
 		rollback_restore || { printf '%s\n' 'Could not recover the interrupted restore.'; return 1; }
 	fi
 	case "$1" in
+		upload) upload_core "$3" ;;
 		backup|backup-core|backup-config|restore|restore-core|restore-config) local_core_action "$@" ;;
 		force|'') update_core "$1" ;;
 		*) return 1 ;;

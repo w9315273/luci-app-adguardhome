@@ -59,11 +59,41 @@ msgstr "详细日志"
 msgid "Upgrade Core"
 msgstr "更新核心"
 
-msgid "Update core version"
-msgstr "更新核心版本"
+msgid "Update core"
+msgstr "更新核心"
 
 msgid "Force update"
 msgstr "强制更新"
+
+msgid "Upload core"
+msgstr "手动上传"
+
+msgid "Core file"
+msgstr "核心文件"
+
+msgid "File SHA-256 (optional)"
+msgstr "文件 SHA-256 (选填)"
+
+msgid "Enter 64 hexadecimal characters with or without the sha256: prefix."
+msgstr "请输入 64 个十六进制字符, 可保留 sha256: 前缀."
+
+msgid "Upload and install"
+msgstr "上传并安装"
+
+msgid "Choose a non-empty file of up to 128 MiB."
+msgstr "请选择非空文件, 大小不能超过 128 MiB."
+
+msgid "Choose the AdGuard Home Linux binary or its official .tar.gz archive for this device (up to 128 MiB). Use a trusted source."
+msgstr "请选择适用于本设备的 AdGuard Home Linux 核心文件或官方 .tar.gz 压缩包 (最大 128 MiB). 请使用可信来源的文件."
+
+msgid "Uploading core..."
+msgstr "正在上传核心..."
+
+msgid "Unable to upload or install the core."
+msgstr "无法上传或安装核心."
+
+msgid "Another core task is running. Try uploading again when it finishes."
+msgstr "另一个核心任务正在运行, 请在完成后重新上传."
 
 msgid "Backup / Restore"
 msgstr "备份/恢复"
@@ -177,6 +207,46 @@ msgstr "更新状态不可用"
 msgctxt "Core update log"
 msgid "Checking for core updates..."
 msgstr "开始检查更新, 请耐心等待 ..."
+
+msgctxt "Core update log"
+msgid "Validating the uploaded core..."
+msgstr "正在校验上传的核心..."
+
+msgctxt "Core update log"
+msgid "Uploaded file SHA-256 verification failed."
+msgstr "上传文件的 SHA-256 校验失败, 安装已停止."
+
+msgctxt "Core update log"
+msgid "Uploaded file SHA-256 verified."
+msgstr "上传文件的 SHA-256 校验通过."
+
+msgctxt "Core update log"
+msgid "The uploaded file is missing, empty, or exceeds 128 MiB."
+msgstr "上传文件不存在, 为空或超过 128 MiB."
+
+msgctxt "Core update log"
+msgid "Select an AdGuard Home Linux binary or its official .tar.gz archive."
+msgstr "请选择 AdGuard Home Linux 核心文件或官方 .tar.gz 压缩包."
+
+msgctxt "Core update log"
+msgid "The uploaded core does not match the device architecture."
+msgstr "上传的核心与设备架构不匹配."
+
+msgctxt "Core update log"
+msgid "The uploaded file is not an AdGuard Home Linux core."
+msgstr "上传的文件不是 AdGuard Home Linux 核心."
+
+msgctxt "Core update log"
+msgid "Uploaded AdGuard Home version"
+msgstr "上传的 AdGuard Home 核心版本"
+
+msgctxt "Core update log"
+msgid "Failed to extract the core archive within the 128 MiB limit."
+msgstr "无法解压核心文件, 或解压后的大小超过 128 MiB."
+
+msgctxt "Core update log"
+msgid "The configured YAML file is not readable."
+msgstr "无法读取当前的 YAML 配置文件."
 
 msgctxt "Core update log"
 msgid "Update check failed. Check your network or try again later."
