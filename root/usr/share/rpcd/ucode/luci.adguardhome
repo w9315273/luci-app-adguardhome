@@ -1,7 +1,7 @@
 #!/usr/bin/ucode
 'use strict';
 
-import { stat, lstat, readlink, dirname, basename, open, popen, readfile, writefile, unlink, lsdir, mkdir, mkdtemp, rmdir, rename } from 'fs';
+import { stat, lstat, readlink, dirname, basename, open, popen, readfile, writefile, unlink, lsdir, mkdir, rmdir, rename } from 'fs';
 import { cursor } from 'uci';
 import { timer } from 'uloop';
 
@@ -218,8 +218,12 @@ function prepareCoreUpload(request) {
 	const root = lstat(uploadRoot);
 	if (root?.type != 'directory' || root.uid != 0 || root.mode != 0o700)
 		return {};
-	const dir = mkdtemp(uploadRoot + '/XXXXXX');
-	if (!dir)
+	// 旧版 ucode 的 fs 模块缺少 mkdtemp, 使用 BusyBox 原子创建私有目录.
+	const proc = popen('mktemp -d ' + shellQuote(uploadRoot + '/XXXXXX'), 'r');
+	if (!proc)
+		return {};
+	const dir = trim(proc.read('all') || '');
+	if (proc.close() !== 0 || !dir)
 		return {};
 	if (writefile(dir + '/.session', request.args.ubus_rpc_session || 'local') == null) {
 		clearUpload(dir);
